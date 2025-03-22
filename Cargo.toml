@@ -12,3 +12,8 @@ anyhow = "1.0"
 colored = "2.0"
 byteorder = "1.4"
 thiserror = "1.0"
+tempfile = "3.8"
+
+[[bin]]
+name = "pganalyzer"
+path = "src/main.rs"
