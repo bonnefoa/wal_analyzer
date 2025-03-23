@@ -1,4 +1,4 @@
-use wal_analyzer::xlog_page_header::parse_xlog_page_header;
+use wal_analyzer::xlog_page::parse_xlog_page_header;
 
 #[test]
 fn test_parse_page_header() {
@@ -17,4 +17,3 @@ fn test_page_too_small() {
     let res = parse_xlog_page_header(input);
     assert!(matches!(res, Err(nom::Err::Incomplete(_))));
 }
-

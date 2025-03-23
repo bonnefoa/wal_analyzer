@@ -1,4 +1,4 @@
-use std::{fmt, u16};
+use std::fmt;
 
 use nom::error::{ErrorKind, ParseError};
 

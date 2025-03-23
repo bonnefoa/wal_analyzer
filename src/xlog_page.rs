@@ -1,6 +1,6 @@
+use crate::error::XLogError;
 use nom::number::streaming::{le_u16, le_u32, le_u64};
 use nom::IResult;
-use crate::error::XLogError;
 
 #[derive(Clone, Debug)]
 pub struct XLogPageHeader {
@@ -9,6 +9,18 @@ pub struct XLogPageHeader {
     pub xlp_tli: u32,
     pub xlp_pageaddr: u64,
     pub xlp_rem_len: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct XLogLongPageHeader {
+    // standard header fiels
+    pub std: XLogPageHeader,
+    // system identifier from pg_control
+    pub xlp_sysid: u64,
+    // just as a cross-check
+    pub xlp_seg_size: u32,
+    // just as a cross-check
+    pub xlp_xlog_blcksz: u32,
 }
 
 pub fn parse_xlog_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, XLogError<&[u8]>> {
@@ -25,6 +37,8 @@ pub fn parse_xlog_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, XLogEr
     let (i, xlp_tli) = le_u32(i)?;
     let (i, xlp_pageaddr) = le_u64(i)?;
     let (i, xlp_rem_len) = le_u32(i)?;
+
+    // TODO: Handle long page header
 
     let page_header = XLogPageHeader {
         xlp_magic,
