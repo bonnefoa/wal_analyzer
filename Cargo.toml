@@ -1,10 +1,18 @@
 [package]
-name = "pganalyzer"
+name = "wal_analyzer"
 version = "0.1.0"
 edition = "2021"
 authors = ["Anthonin Bonnefoy <anthonin.bonnefoy@datadoghq.com>"]
 description = "A PostgreSQL WAL analyzer CLI tool"
 license = "MIT"
+
+include = [
+  "README.md",
+  ".gitignore",
+  "Cargo.toml",
+  "src/*.rs",
+  "tests/*.rs"
+]
 
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
@@ -14,7 +22,8 @@ byteorder = "1.4"
 thiserror = "1.0"
 tempfile = "3.8"
 nom = "8.0.0"
+hex-literal = "1.0.0"
 
 [[bin]]
-name = "pganalyzer"
+name = "wal_analyzer"
 path = "src/main.rs"

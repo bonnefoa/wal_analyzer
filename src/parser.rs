@@ -1,0 +1,58 @@
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum RmgrId {
+    Xlog,
+    Transaction,
+    Storage,
+    Clog,
+    Database,
+    Tablespace,
+    MultiXact,
+    RelMap,
+    Standby,
+    Heap,
+    Heap2,
+    Index,
+    Btree,
+    Hash,
+    Gin,
+    Gist,
+    Sequence,
+    Spgist,
+    Brin,
+    CommitTs,
+    ReplicationOrigin,
+    Generic,
+    LogicalMsg,
+    Unused(u8),
+}
+
+impl From<u8> for RmgrId {
+    fn from(byte: u8) -> RmgrId {
+        match byte {
+            0x00 => RmgrId::Xlog,
+            0x01 => RmgrId::Transaction,
+            0x02 => RmgrId::Storage,
+            0x03 => RmgrId::Clog,
+            0x04 => RmgrId::Database,
+            0x05 => RmgrId::Tablespace,
+            0x06 => RmgrId::MultiXact,
+            0x07 => RmgrId::RelMap,
+            0x08 => RmgrId::Standby,
+            0x09 => RmgrId::Heap,
+            0x0a => RmgrId::Heap2,
+            0x0b => RmgrId::Index,
+            0x0c => RmgrId::Btree,
+            0x0d => RmgrId::Hash,
+            0x0e => RmgrId::Gin,
+            0x0f => RmgrId::Gist,
+            0x10 => RmgrId::Sequence,
+            0x11 => RmgrId::Spgist,
+            0x12 => RmgrId::Brin,
+            0x13 => RmgrId::CommitTs,
+            0x14 => RmgrId::ReplicationOrigin,
+            0x15 => RmgrId::Generic,
+            0x16 => RmgrId::LogicalMsg,
+            otherwise => RmgrId::Unused(otherwise),
+        }
+    }
+}
