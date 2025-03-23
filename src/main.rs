@@ -1,6 +1,6 @@
 use clap::Parser;
 mod xlog;
-use xlog::{XLogError, XLogReader, XLOG_BLCKSZ};
+use xlog::{XLogError, XLogReader};
 use std::path::PathBuf;
 use std::env;
 
@@ -8,18 +8,18 @@ use std::env;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path to the XLOG file
-    path: PathBuf,
-    /// Limit the number of pages to process
+    /// Path to WAL segment to process
+    wal_segment: PathBuf,
+
+    /// Limit of records to process
     #[arg(short, long)]
-    limit: Option<u64>,
+    record_limit: Option<u64>,
 }
 
 fn process_xlog_file(path: PathBuf) -> Result<(), XLogError> {
     println!("Processing XLOG file: {}", path.display());
-    
-    let mut reader = XLogReader::new(path, None)?;
-    println!("File size: {} bytes ({} pages)", reader.file_size, reader.file_size / XLOG_BLCKSZ);
+
+    let reader = XLogReader::new(path, None)?;
 
     for (page_num, page_result) in reader.enumerate() {
         match page_result {
@@ -35,7 +35,7 @@ fn process_xlog_file(path: PathBuf) -> Result<(), XLogError> {
                     println!("    CRC: 0x{:X}", record.xl_crc);
                     println!("    Data length: {} bytes", record.xl_data.len());
                     if !record.xl_data.is_empty() {
-                        println!("    First 16 bytes of data: {:?}", 
+                        println!("    First 16 bytes of data: {:?}",
                             record.xl_data.iter().take(16).map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(" "));
                     }
                 }
@@ -52,7 +52,7 @@ fn process_xlog_file(path: PathBuf) -> Result<(), XLogError> {
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
-        eprintln!("Usage: {} <xlog_file>", args[0]);
+        eprintln!("Usage: {} <wal_segment>", args[0]);
         std::process::exit(1);
     }
 
