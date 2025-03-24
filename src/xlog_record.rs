@@ -1,4 +1,4 @@
-use nom::{number::streaming::{le_u32, le_u64, le_u8}, IResult};
+use nom::{number::complete::{le_u32, le_u64, le_u8}, IResult};
 use crate::error::XLogError;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]

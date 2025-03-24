@@ -7,6 +7,7 @@ pub enum XLogError<I: Sized> {
     /// No more data available
     Eof,
     InvalidPageHeader,
+    IncorrectPageType,
     InvalidRecord(String),
 
     /// An error encountered during parsing
@@ -30,6 +31,7 @@ where
         match self {
             XLogError::Eof => write!(f, "End of file"),
             XLogError::InvalidPageHeader => write!(f, "Invalid page header"),
+            XLogError::IncorrectPageType => write!(f, "Incorrect page type"),
             XLogError::InvalidRecord(e) => write!(f, "Invalid XLog Record {:?}", e),
             XLogError::NomError(i, e) => write!(f, "Internal parser error {:?}, input {:?}", e, i),
         }
