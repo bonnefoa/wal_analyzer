@@ -1,4 +1,4 @@
-use wal_analyzer::xlog::{parse_filename, XLogFilePos};
+use wal_analyzer::xlog::{parse_filename, xlog_seg_to_recptr, XLogFilePos, XLogRecPtr};
 
 #[test]
 fn test_parse_filename() {
@@ -14,4 +14,11 @@ fn test_parse_filename() {
             panic!("Unexpected output: {:?}", e)
         }
     }
+}
+
+#[test]
+fn test_xlog_seg_to_recptr() {
+    let walsegsize = 16 * 1024 * 1024; // 16MB
+    let XLogRecPtr(res) = xlog_seg_to_recptr(2, walsegsize, 0);
+    assert_eq!(res, 33554432);
 }

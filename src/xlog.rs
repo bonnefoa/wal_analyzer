@@ -16,6 +16,10 @@ pub struct XLogFilePos {
     pub seg: u32,
 }
 
+pub fn xlog_seg_to_recptr(segno: u32, walsegsize: u32, offset: u32) -> XLogRecPtr {
+    XLogRecPtr((segno * walsegsize + offset).into())
+}
+
 pub fn parse_filename(fname: &str) -> Result<XLogFilePos, std::num::ParseIntError> {
     let tli = u32::from_str_radix(&fname[0..8], 16)?;
     let log = u32::from_str_radix(&fname[8..16], 16)?;

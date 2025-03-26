@@ -1,4 +1,4 @@
-use nom::{number::complete::{le_u32, le_u64, le_u8}, IResult};
+use nom::{bytes::complete::take, number::complete::{le_u32, le_u64, le_u8}, IResult};
 use crate::error::XLogError;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -94,6 +94,9 @@ pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]
     let record = XLogRecord{
         xl_tot_len, xl_xid, xl_prev, xl_info, xl_rmid, xl_crc
     };
+    // TODO: Process record blocks
+    let (i, _data) = take(xl_tot_len - 22)(i)?;
+
     Ok((i, record))
 }
 
