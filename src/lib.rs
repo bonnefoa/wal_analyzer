@@ -1,5 +1,5 @@
-pub mod parser;
-pub mod xlog;
-pub mod xlog_page;
-pub mod xlog_record;
 pub mod error;
+pub mod parser;
+pub mod xlog_page;
+pub mod xlog_reader;
+pub mod xlog_record;

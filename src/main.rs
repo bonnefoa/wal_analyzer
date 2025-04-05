@@ -1,7 +1,7 @@
 use clap::Parser;
-mod xlog;
-use std::path::PathBuf;
 use std::env;
+use std::path::PathBuf;
+use wal_analyzer::xlog_reader::XLogReader;
 
 /// A PostgreSQL XLOG analyzer CLI tool
 #[derive(Parser, Debug)]
@@ -17,9 +17,9 @@ struct Args {
 
 // fn process_xlog_file(path: PathBuf) -> Result<(), XLogError<&[u8]>> {
 //     println!("Processing XLOG file: {}", path.display());
-// 
+//
 // //    let reader = XLogReader::new(path, None)?;
-// 
+//
 // //    for (page_num, page_result) in reader.enumerate() {
 // //        match page_result {
 // //            Ok(records) => {
@@ -44,20 +44,28 @@ struct Args {
 // //            }
 // //        }
 // //    }
-// 
+//
 //     Ok(())
 // }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: {} <wal_segment>", args[0]);
-        std::process::exit(1);
+    let args = Args::parse();
+    //    let args: Vec<String> = env::args().collect();
+    //    if args.len() != 2 {
+    //        eprintln!("Usage: {} <wal_segment>", args[0]);
+    //        std::process::exit(1);
+    //    }
+
+    let mut reader =
+        XLogReader::new_from_filename(args.wal_segment).expect("Error building reader");
+    match reader.read_next_record() {
+        Ok(record) => print!("Got record: {:?}", record),
+        Err(e) => panic!("Got error: {:?}", e),
     }
 
-//    let path = PathBuf::from(&args[1]);
-//    if let Err(e) = process_xlog_file(path) {
-//        eprintln!("Error: {}", e);
-//        std::process::exit(1);
-//    }
+    //    let path = PathBuf::from(&args[1]);
+    //    if let Err(e) = process_xlog_file(path) {
+    //        eprintln!("Error: {}", e);
+    //        std::process::exit(1);
+    //    }
 }

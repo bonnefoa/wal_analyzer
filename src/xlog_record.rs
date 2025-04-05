@@ -1,5 +1,9 @@
-use nom::{bytes::complete::take, number::complete::{le_u32, le_u64, le_u8}, IResult};
 use crate::error::XLogError;
+use nom::{
+    bytes::complete::take,
+    number::complete::{le_u32, le_u64, le_u8},
+    IResult,
+};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum RmgrId {
@@ -80,7 +84,9 @@ pub struct XLogRecord {
 
 pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]>> {
     if i.len() < XLOG_RECORD_HEADER_SIZE {
-        return Err(nom::Err::Incomplete(nom::Needed::new(XLOG_RECORD_HEADER_SIZE - i.len())));
+        return Err(nom::Err::Incomplete(nom::Needed::new(
+            XLOG_RECORD_HEADER_SIZE - i.len(),
+        )));
     }
 
     let (i, xl_tot_len) = le_u32(i)?;
@@ -91,12 +97,16 @@ pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]
     let (i, xl_crc) = le_u32(i)?;
 
     let xl_rmid = RmgrId::from(rmid);
-    let record = XLogRecord{
-        xl_tot_len, xl_xid, xl_prev, xl_info, xl_rmid, xl_crc
+    let record = XLogRecord {
+        xl_tot_len,
+        xl_xid,
+        xl_prev,
+        xl_info,
+        xl_rmid,
+        xl_crc,
     };
     // TODO: Process record blocks
     let (i, _data) = take(xl_tot_len - 22)(i)?;
 
     Ok((i, record))
 }
-

@@ -1,6 +1,6 @@
 use crate::error::XLogError;
-use nom::number::complete::{le_u16, le_u32, le_u64};
 use nom::branch::alt;
+use nom::number::complete::{le_u16, le_u32, le_u64};
 use nom::IResult;
 use nom::Parser;
 
@@ -86,7 +86,6 @@ pub fn parse_xlog_short_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, 
     Ok((i, XLogPageHeader::from(page_header)))
 }
 
-
 // XLogSegNoOffsetToRecPtr
 pub fn parse_xlog_long_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, XLogError<&[u8]>> {
     if i.len() < 36 {
@@ -123,15 +122,12 @@ pub fn parse_xlog_long_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, X
         std,
         xlp_sysid,
         xlp_seg_size,
-        xlp_xlog_blcksz
+        xlp_xlog_blcksz,
     };
 
     Ok((i, XLogPageHeader::from(page_header)))
 }
 
 pub fn parse_xlog_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, XLogError<&[u8]>> {
-    alt((
-        parse_xlog_short_page_header,
-        parse_xlog_long_page_header
-    )).parse(i)
+    alt((parse_xlog_short_page_header, parse_xlog_long_page_header)).parse(i)
 }
