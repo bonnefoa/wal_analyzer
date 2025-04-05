@@ -1,19 +1,22 @@
+use std::io::Read;
+
 use crate::error::XLogError;
+use log::debug;
 use nom::branch::alt;
 use nom::number::complete::{le_u16, le_u32, le_u64};
 use nom::IResult;
 use nom::Parser;
 
 // When record crosses page boundary, set this flag in new page's header
-const XLP_FIRST_IS_CONTRECORD: u16 = 0x0001;
+pub const XLP_FIRST_IS_CONTRECORD: u16 = 0x0001;
 // This flag indicates a "long" page header
-const XLP_LONG_HEADER: u16 = 0x0002;
+pub const XLP_LONG_HEADER: u16 = 0x0002;
 // This flag indicates backup blocks starting in this page are optional
-const XLP_BKP_REMOVABLE: u16 = 0x0004;
+pub const XLP_BKP_REMOVABLE: u16 = 0x0004;
 // Replaces a missing contrecord; see CreateOverwriteContrecordRecord
-const XLP_FIRST_IS_OVERWRITE_CONTRECORD: u16 = 0x0008;
+pub const XLP_FIRST_IS_OVERWRITE_CONTRECORD: u16 = 0x0008;
 // All defined flag bits in xlp_info (used for validity checking of header)
-const XLP_ALL_FLAGS: u16 = 0x000F;
+pub const XLP_ALL_FLAGS: u16 = 0x000F;
 
 const XLP_MAGIC: u16 = 0xd10d;
 
@@ -75,6 +78,7 @@ pub fn parse_xlog_short_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, 
     let (i, xlp_pageaddr) = le_u64(i)?;
     let (i, xlp_rem_len) = le_u32(i)?;
 
+    debug!("Parsed a short page at {}, remaning length {}", xlp_pageaddr, xlp_rem_len);
     let page_header = XLogShortPageHeader {
         xlp_magic,
         xlp_info,
@@ -86,10 +90,9 @@ pub fn parse_xlog_short_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, 
     Ok((i, XLogPageHeader::from(page_header)))
 }
 
-// XLogSegNoOffsetToRecPtr
 pub fn parse_xlog_long_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, XLogError<&[u8]>> {
-    if i.len() < 36 {
-        return Err(nom::Err::Incomplete(nom::Needed::new(36 - i.len())));
+    if i.len() < 40 {
+        return Err(nom::Err::Incomplete(nom::Needed::new(40 - i.len())));
     }
 
     let (i, xlp_magic) = le_u16(i)?;
@@ -106,6 +109,7 @@ pub fn parse_xlog_long_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, X
     let (i, xlp_pageaddr) = le_u64(i)?;
     let (i, xlp_rem_len) = le_u32(i)?;
 
+    debug!("Parsed a long page at {:#02x}, remaning length {}", xlp_pageaddr, xlp_rem_len);
     let std = XLogShortPageHeader {
         xlp_magic,
         xlp_info,
@@ -113,6 +117,12 @@ pub fn parse_xlog_long_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, X
         xlp_pageaddr,
         xlp_rem_len,
     };
+
+    // 4 bytes of memory padding
+    let (i, padding) = le_u32(i)?;
+    if padding != 0 {
+        return Err(nom::Err::Error(XLogError::IncorrectPaddingValue(padding)));
+    }
 
     let (i, xlp_sysid) = le_u64(i)?;
     let (i, xlp_seg_size) = le_u32(i)?;

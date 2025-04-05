@@ -1,5 +1,4 @@
 use clap::Parser;
-use std::env;
 use std::path::PathBuf;
 use wal_analyzer::xlog_reader::XLogReader;
 
@@ -56,6 +55,7 @@ fn main() {
     //        std::process::exit(1);
     //    }
 
+    env_logger::init();
     let mut reader =
         XLogReader::new_from_filename(args.wal_segment).expect("Error building reader");
     match reader.read_next_record() {
