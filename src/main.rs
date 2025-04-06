@@ -49,23 +49,17 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    //    let args: Vec<String> = env::args().collect();
-    //    if args.len() != 2 {
-    //        eprintln!("Usage: {} <wal_segment>", args[0]);
-    //        std::process::exit(1);
-    //    }
-
     env_logger::init();
+
     let mut reader =
         XLogReader::new_from_filename(args.wal_segment).expect("Error building reader");
-    match reader.read_next_record() {
-        Ok(record) => print!("Got record: {:?}", record),
-        Err(e) => panic!("Got error: {:?}", e),
-    }
 
-    //    let path = PathBuf::from(&args[1]);
-    //    if let Err(e) = process_xlog_file(path) {
-    //        eprintln!("Error: {}", e);
-    //        std::process::exit(1);
-    //    }
+    for (record) in reader.enumerate() {
+        match record {
+            Ok(r) => {
+                println!("Got record: {}", r);
+            }
+            Err(e) => panic!("Got error: {:?}", e),
+        }
+    }
 }

@@ -1,9 +1,10 @@
 use crate::error::XLogError;
-use nom::{
-    bytes::complete::take,
-    number::complete::{le_u32, le_u64, le_u8},
-    IResult,
-};
+use log::debug;
+use nom::bytes::complete::take;
+use nom::multi;
+use nom::number::complete::{le_u32, le_u64, le_u8};
+use nom::IResult;
+use nom::Parser;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum RmgrId {
@@ -64,7 +65,39 @@ impl From<u8> for RmgrId {
     }
 }
 
-const XLOG_RECORD_HEADER_SIZE: usize = 22;
+impl std::fmt::Display for RmgrId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let s = match self {
+            RmgrId::Xlog => "Xlog",
+            RmgrId::Transaction => "Transaction",
+            RmgrId::Storage => "Storage",
+            RmgrId::Clog => "Clog",
+            RmgrId::Database => "Database",
+            RmgrId::Tablespace => "Tablespace",
+            RmgrId::MultiXact => "MultiXact",
+            RmgrId::RelMap => "RelMap",
+            RmgrId::Standby => "Standby",
+            RmgrId::Heap => "Heap",
+            RmgrId::Heap2 => "Heap2",
+            RmgrId::Index => "Index",
+            RmgrId::Btree => "Btree",
+            RmgrId::Hash => "Hash",
+            RmgrId::Gin => "Gin",
+            RmgrId::Gist => "Gist",
+            RmgrId::Sequence => "Sequence",
+            RmgrId::Spgist => "Spgist",
+            RmgrId::Brin => "Brin",
+            RmgrId::CommitTs => "CommitTs",
+            RmgrId::ReplicationOrigin => "ReplicationOrigin",
+            RmgrId::Generic => "Generic",
+            RmgrId::LogicalMsg => "LogicalMsg",
+            RmgrId::Unused(_) => "Unused",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+const XLOG_RECORD_HEADER_SIZE: u32 = 22;
 
 #[derive(Clone, Debug)]
 pub struct XLogRecord {
@@ -82,10 +115,21 @@ pub struct XLogRecord {
     pub xl_crc: u32,
 }
 
+impl std::fmt::Display for XLogRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "rmgr: {}, len: {}, tx: {}, prev: {:08X}",
+            self.xl_rmid, self.xl_tot_len, self.xl_xid, self.xl_prev
+        )
+    }
+}
+
 pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]>> {
-    if i.len() < XLOG_RECORD_HEADER_SIZE {
+    let header_size = XLOG_RECORD_HEADER_SIZE as usize;
+    if i.len() < header_size {
         return Err(nom::Err::Incomplete(nom::Needed::new(
-            XLOG_RECORD_HEADER_SIZE - i.len(),
+            header_size - i.len(),
         )));
     }
 
@@ -105,8 +149,16 @@ pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]
         xl_rmid,
         xl_crc,
     };
+
+    debug!("Parsed a record of {}", xl_tot_len);
     // TODO: Process record blocks
-    let (i, _data) = take(xl_tot_len - 22)(i)?;
+    let (i, _data) = take(xl_tot_len - XLOG_RECORD_HEADER_SIZE)(i)?;
+    let padding = i.len() % 8;
+    take(padding)(i)?;
 
     Ok((i, record))
+}
+
+pub fn parse_xlog_records(i: &[u8]) -> IResult<&[u8], Vec<XLogRecord>, XLogError<&[u8]>> {
+    multi::many1(parse_xlog_record).parse(i)
 }

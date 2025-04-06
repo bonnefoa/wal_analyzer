@@ -33,7 +33,9 @@ where
             XLogError::Eof => write!(f, "End of file"),
             XLogError::InvalidPageHeader => write!(f, "Invalid page header"),
             XLogError::IncorrectPageType => write!(f, "Incorrect page type"),
-            XLogError::IncorrectPaddingValue(padding) => write!(f, "Incorrect padding value {:?}", padding),
+            XLogError::IncorrectPaddingValue(padding) => {
+                write!(f, "Incorrect padding value {:?}", padding)
+            }
             XLogError::InvalidRecord(e) => write!(f, "Invalid XLog Record {:?}", e),
             XLogError::NomParseError(i, e) => {
                 write!(f, "Internal parser error {:?}, input {:?}", e, i)

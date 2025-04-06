@@ -1,8 +1,7 @@
-use std::io::Read;
-
 use crate::error::XLogError;
+use crate::xlog_record::{parse_xlog_records, XLogRecord};
 use log::debug;
-use nom::branch::alt;
+use nom::branch;
 use nom::number::complete::{le_u16, le_u32, le_u64};
 use nom::IResult;
 use nom::Parser;
@@ -47,6 +46,8 @@ pub enum XLogPageHeader {
     Long(XLogLongPageHeader),
 }
 
+pub type XLogPageContext = (XLogPageHeader, Vec<XLogRecord>);
+
 impl From<XLogShortPageHeader> for XLogPageHeader {
     fn from(value: XLogShortPageHeader) -> Self {
         XLogPageHeader::Short(value)
@@ -78,7 +79,10 @@ pub fn parse_xlog_short_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, 
     let (i, xlp_pageaddr) = le_u64(i)?;
     let (i, xlp_rem_len) = le_u32(i)?;
 
-    debug!("Parsed a short page at {}, remaning length {}", xlp_pageaddr, xlp_rem_len);
+    debug!(
+        "Parsed a short page at {}, remaning length {}",
+        xlp_pageaddr, xlp_rem_len
+    );
     let page_header = XLogShortPageHeader {
         xlp_magic,
         xlp_info,
@@ -109,7 +113,10 @@ pub fn parse_xlog_long_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, X
     let (i, xlp_pageaddr) = le_u64(i)?;
     let (i, xlp_rem_len) = le_u32(i)?;
 
-    debug!("Parsed a long page at {:#02x}, remaning length {}", xlp_pageaddr, xlp_rem_len);
+    debug!(
+        "Parsed a long page at {:#02x}, remaning length {}",
+        xlp_pageaddr, xlp_rem_len
+    );
     let std = XLogShortPageHeader {
         xlp_magic,
         xlp_info,
@@ -139,5 +146,9 @@ pub fn parse_xlog_long_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, X
 }
 
 pub fn parse_xlog_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, XLogError<&[u8]>> {
-    alt((parse_xlog_short_page_header, parse_xlog_long_page_header)).parse(i)
+    branch::alt((parse_xlog_short_page_header, parse_xlog_long_page_header)).parse(i)
+}
+
+pub fn parse_xlog_page_content(i: &[u8]) -> IResult<&[u8], XLogPageContext, XLogError<&[u8]>> {
+    (parse_xlog_page_header, parse_xlog_records).parse(i)
 }

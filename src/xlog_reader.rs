@@ -91,10 +91,24 @@ impl XLogReader {
         format!("{}/pg_wal/{}", self.data_dir, wal_filename)
     }
 
-    pub fn read_next_record(&mut self) -> Result<XLogRecord, ReaderError<&[u8]>> {
+    pub fn read_next_record(&mut self) -> Result<Vec<XLogRecord>, ReaderError<&[u8]>> {
         self.f.read_exact(&mut self.buffer)?;
+        let mut vec = Vec::new();
         let (i, _page_header) = parse_xlog_page_header(&self.buffer).finish()?;
-        let (_i, record) = parse_xlog_record(i).finish()?;
-        Ok(record)
+        loop {
+            let (i, record) = parse_xlog_record(i).finish()?;
+            vec.push(record);
+            if i.is_empty() {
+                return Ok(vec);
+            }
+        }
+    }
+}
+
+impl Iterator for XLogReader {
+    type Item = XLogRecord;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        todo!()
     }
 }
