@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use nom::Finish;
 
 use crate::error::XLogError;
-use crate::xlog_page::parse_xlog_page_header;
-use crate::xlog_record::{parse_xlog_record, XLogRecord};
+use crate::xlog_page::{parse_xlog_page, XLogPageContent};
+use crate::xlog_record::XLogRecord;
 
 pub type XLogRecPtr = u64;
 pub type TimelineID = u32;
@@ -42,6 +42,7 @@ pub struct XLogReader {
     // records_read: u64,
     f: File,
     buffer: [u8; 8192],
+    page: Option<XLogPageContent>,
 }
 
 #[derive(Debug)]
@@ -73,6 +74,7 @@ impl XLogReader {
         let wal_seg_size = metadata.size();
         let current_rec_ptr = file_pos.get_xlog_rec_ptr(wal_seg_size);
         let buffer = [0; 8192];
+        let page = None;
 
         Ok(Self {
             current_rec_ptr,
@@ -81,6 +83,7 @@ impl XLogReader {
             wal_seg_size,
             f,
             buffer,
+            page,
         })
     }
 
@@ -91,17 +94,17 @@ impl XLogReader {
         format!("{}/pg_wal/{}", self.data_dir, wal_filename)
     }
 
-    pub fn read_next_record(&mut self) -> Result<Vec<XLogRecord>, ReaderError<&[u8]>> {
+    pub fn read_next_page(&mut self) -> Result<XLogPageContent, ReaderError<&[u8]>> {
         self.f.read_exact(&mut self.buffer)?;
-        let mut vec = Vec::new();
-        let (i, _page_header) = parse_xlog_page_header(&self.buffer).finish()?;
-        loop {
-            let (i, record) = parse_xlog_record(i).finish()?;
-            vec.push(record);
-            if i.is_empty() {
-                return Ok(vec);
-            }
+        let (i, r) = parse_xlog_page(&self.buffer).finish()?;
+        if !i.is_empty() {
+            return Err(ReaderError::ParseError(XLogError::LeftoverData));
         }
+        Ok(r)
+    }
+
+    pub fn pop_record(&mut self) -> Option<XLogRecord> {
+        self.page.as_mut().and_then(|p| p.records.pop())
     }
 }
 
@@ -109,6 +112,12 @@ impl Iterator for XLogReader {
     type Item = XLogRecord;
 
     fn next(&mut self) -> Option<Self::Item> {
-        todo!()
+        if self.page.as_ref().map_or(0, |p| p.records.len()) == 0 {
+            match self.read_next_page() {
+                Ok(page) => self.page = Some(page),
+                Err(_) => return None,
+            };
+        }
+        self.pop_record()
     }
 }

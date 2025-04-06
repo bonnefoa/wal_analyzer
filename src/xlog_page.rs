@@ -2,6 +2,8 @@ use crate::error::XLogError;
 use crate::xlog_record::{parse_xlog_records, XLogRecord};
 use log::debug;
 use nom::branch;
+use nom::combinator::map;
+use nom::multi::many1;
 use nom::number::complete::{le_u16, le_u32, le_u64};
 use nom::IResult;
 use nom::Parser;
@@ -46,7 +48,11 @@ pub enum XLogPageHeader {
     Long(XLogLongPageHeader),
 }
 
-pub type XLogPageContext = (XLogPageHeader, Vec<XLogRecord>);
+#[derive(Debug)]
+pub struct XLogPageContent {
+    pub page_header: XLogPageHeader,
+    pub records: Vec<XLogRecord>,
+}
 
 impl From<XLogShortPageHeader> for XLogPageHeader {
     fn from(value: XLogShortPageHeader) -> Self {
@@ -149,6 +155,16 @@ pub fn parse_xlog_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, XLogEr
     branch::alt((parse_xlog_short_page_header, parse_xlog_long_page_header)).parse(i)
 }
 
-pub fn parse_xlog_page_content(i: &[u8]) -> IResult<&[u8], XLogPageContext, XLogError<&[u8]>> {
-    (parse_xlog_page_header, parse_xlog_records).parse(i)
+pub fn parse_xlog_page(i: &[u8]) -> IResult<&[u8], XLogPageContent, XLogError<&[u8]>> {
+    map((parse_xlog_page_header, parse_xlog_records), |t| {
+        XLogPageContent {
+            page_header: t.0,
+            records: t.1,
+        }
+    })
+    .parse(i)
+}
+
+pub fn parse_xlog_pages(i: &[u8]) -> IResult<&[u8], Vec<XLogPageContent>, XLogError<&[u8]>> {
+    many1(parse_xlog_page).parse(i)
 }
