@@ -1,8 +1,5 @@
 use wal_analyzer::{
-    xlog_page::{
-        parse_xlog_page_header, XLogLongPageHeader, XLogPageHeader, XLP_BKP_REMOVABLE,
-        XLP_LONG_HEADER,
-    },
+    xlog_page::{parse_xlog_page_header, XLogPageHeader, XLP_BKP_REMOVABLE, XLP_LONG_HEADER},
     xlog_reader::{parse_filename, XLogFilePos},
     xlog_record::{parse_xlog_record, RmgrId},
 };
@@ -84,5 +81,8 @@ fn test_page_with_two_records() {
     assert_eq!(record.xl_crc, 3227241253);
 
     let (i, record) = parse_xlog_record(i).unwrap();
+    assert_eq!(record.xl_rmid, RmgrId::Btree);
+    assert_eq!(record.xl_xid, 744);
+    assert_eq!(record.xl_crc, 2105440276);
     assert_eq!(i.len(), 0);
 }
