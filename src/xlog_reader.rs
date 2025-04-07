@@ -38,8 +38,6 @@ pub struct XLogReader {
 
     data_dir: String,
     wal_seg_size: u64,
-    // record_limit: Option<u64>,
-    // records_read: u64,
     f: File,
     buffer: [u8; 8192],
     page: Option<XLogPageContent>,

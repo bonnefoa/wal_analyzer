@@ -2,7 +2,7 @@ use crate::error::XLogError;
 use log::debug;
 use nom::bytes::complete::take;
 use nom::multi;
-use nom::number::complete::{le_u32, le_u64, le_u8};
+use nom::number::complete::{le_u16, le_u32, le_u64, le_u8};
 use nom::IResult;
 use nom::Parser;
 
@@ -46,8 +46,8 @@ impl From<u8> for RmgrId {
             0x06 => RmgrId::MultiXact,
             0x07 => RmgrId::RelMap,
             0x08 => RmgrId::Standby,
-            0x09 => RmgrId::Heap,
-            0x0a => RmgrId::Heap2,
+            0x09 => RmgrId::Heap2,
+            0x0a => RmgrId::Heap,
             0x0b => RmgrId::Index,
             0x0c => RmgrId::Btree,
             0x0d => RmgrId::Hash,
@@ -97,7 +97,7 @@ impl std::fmt::Display for RmgrId {
     }
 }
 
-const XLOG_RECORD_HEADER_SIZE: u32 = 22;
+const XLOG_RECORD_HEADER_SIZE: u32 = 24;
 
 #[derive(Clone, Debug)]
 pub struct XLogRecord {
@@ -138,6 +138,12 @@ pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]
     let (i, xl_prev) = le_u64(i)?;
     let (i, xl_info) = le_u8(i)?;
     let (i, rmid) = le_u8(i)?;
+    let (i, padding) = le_u16(i)?;
+    if padding != 0 {
+        return Err(nom::Err::Error(XLogError::IncorrectPaddingValue(
+            u32::from(padding),
+        )));
+    }
     let (i, xl_crc) = le_u32(i)?;
 
     let xl_rmid = RmgrId::from(rmid);
@@ -151,10 +157,15 @@ pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]
     };
 
     debug!("Parsed a record of {}", xl_tot_len);
+
     // TODO: Process record blocks
-    let (i, _data) = take(xl_tot_len - XLOG_RECORD_HEADER_SIZE)(i)?;
-    let padding = i.len() % 8;
-    take(padding)(i)?;
+    let data_len = (xl_tot_len - XLOG_RECORD_HEADER_SIZE) as usize;
+    if i.len() < data_len {
+        return Err(nom::Err::Incomplete(nom::Needed::new(data_len)));
+    }
+    let (i, _data) = take(data_len)(i)?;
+    let (i, _padding) = take(i.len() % 8)(i)?;
+    // Check padding value
 
     Ok((i, record))
 }
