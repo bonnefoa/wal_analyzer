@@ -7,8 +7,8 @@ pub enum XLogError<I: Sized> {
     /// No more data available
     Eof,
     InvalidPageHeader,
+    EmptyRecord,
     IncorrectPageType,
-    LeftoverData,
     IncorrectPaddingValue(u32),
     InvalidRecord(String),
 
@@ -33,8 +33,8 @@ where
         match self {
             XLogError::Eof => write!(f, "End of file"),
             XLogError::InvalidPageHeader => write!(f, "Invalid page header"),
+            XLogError::EmptyRecord => write!(f, "Empty record"),
             XLogError::IncorrectPageType => write!(f, "Incorrect page type"),
-            XLogError::LeftoverData => write!(f, "Leftover data after parsing"),
             XLogError::IncorrectPaddingValue(padding) => {
                 write!(f, "Incorrect padding value {:?}", padding)
             }

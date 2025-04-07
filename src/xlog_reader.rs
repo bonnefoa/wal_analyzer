@@ -94,10 +94,7 @@ impl XLogReader {
 
     pub fn read_next_page(&mut self) -> Result<XLogPageContent, ReaderError<&[u8]>> {
         self.f.read_exact(&mut self.buffer)?;
-        let (i, r) = parse_xlog_page(&self.buffer).finish()?;
-        if !i.is_empty() {
-            return Err(ReaderError::ParseError(XLogError::LeftoverData));
-        }
+        let (_i, r) = parse_xlog_page(&self.buffer).finish()?;
         Ok(r)
     }
 

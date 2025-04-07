@@ -131,6 +131,10 @@ pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]
     }
 
     let (i, xl_tot_len) = le_u32(i)?;
+    if xl_tot_len == 0 {
+        // Last record of the page
+        return Err(nom::Err::Error(XLogError::EmptyRecord));
+    }
     let (i, xl_xid) = le_u32(i)?;
     let (i, xl_prev) = le_u64(i)?;
     let (i, xl_info) = le_u8(i)?;
@@ -153,7 +157,7 @@ pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]
         xl_crc,
     };
 
-    debug!("Parsed a record of {}", xl_tot_len);
+    debug!("Parsed record {}", record);
 
     // TODO: Process record blocks
     let data_len = (xl_tot_len - XLOG_RECORD_HEADER_SIZE) as usize;
