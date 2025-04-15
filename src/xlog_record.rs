@@ -153,17 +153,16 @@ impl std::fmt::Display for XLogRecordHeader {
 
 impl std::fmt::Display for XLogRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "{}", self.header
-        )
+        write!(f, "{}", self.header)
     }
 }
 
 pub fn consume_padding(i: &[u8], size: usize) -> IResult<&[u8], (), XLogError<&[u8]>> {
     let (i, padding) = take(size)(i)?;
     if padding.iter().all(|x| *x != 0) {
-        return Err(nom::Err::Error(XLogError::IncorrectPaddingValue(padding.to_owned())));
+        return Err(nom::Err::Error(XLogError::IncorrectPaddingValue(
+            padding.to_owned(),
+        )));
     }
     Ok((i, ()))
 }

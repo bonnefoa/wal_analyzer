@@ -21,6 +21,6 @@ fn main() {
     let reader = XLogReader::new_from_filename(args.wal_segment).expect("Error building reader");
 
     for record in reader {
-        println!("Got record: {}", record);
+        println!("{}", record);
     }
 }

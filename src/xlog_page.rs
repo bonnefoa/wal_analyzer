@@ -3,7 +3,6 @@ use std::mem;
 use crate::error::XLogError;
 use crate::xlog_record::{consume_padding, parse_xlog_records, XLogRecord};
 use log::debug;
-use nom::branch;
 use nom::combinator::map;
 use nom::multi::many1;
 use nom::number::complete::{le_u16, le_u32, le_u64};
@@ -50,7 +49,39 @@ pub enum XLogPageHeader {
     Long(XLogLongPageHeader),
 }
 
-#[derive(Debug)]
+impl std::fmt::Display for XLogShortPageHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "xlp_magic: 0x{:02X}, xlp_info: 0x{:02X}, xlp_tli: {}, xlp_pageaddr: 0x{:08X}, xlp_rem_len: {}",
+            self.xlp_magic, self.xlp_info, self.xlp_tli, self.xlp_pageaddr, self.xlp_rem_len
+        )
+    }
+}
+
+impl std::fmt::Display for XLogLongPageHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "std: {}, xlp_sysid: 0x{:08X}, xlp_seg_size: 0x{:04X}, xlp_xlog_blcksz: 0x{:04X}",
+            self.std, self.xlp_sysid, self.xlp_seg_size, self.xlp_xlog_blcksz
+        )
+    }
+}
+
+impl std::fmt::Display for XLogPageHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            XLogPageHeader::Short(xlog_short_page_header) => {
+                write!(f, "Short page header: {}", xlog_short_page_header)
+            }
+            XLogPageHeader::Long(long_page_header) => {
+                write!(f, "Long page header: {}", long_page_header)
+            }
+        }
+    }
+}
+
 pub struct XLogPageContent {
     pub page_header: XLogPageHeader,
     pub records: Vec<XLogRecord>,
@@ -68,66 +99,22 @@ impl From<XLogLongPageHeader> for XLogPageHeader {
     }
 }
 
-pub fn parse_xlog_short_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, XLogError<&[u8]>> {
-    let header_size = mem::size_of::<XLogShortPageHeader>();
-
-    if i.len() < mem::size_of::<XLogShortPageHeader>() {
-        return Err(nom::Err::Incomplete(nom::Needed::new(header_size - i.len())));
+pub fn parse_xlog_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, XLogError<&[u8]>> {
+    let start_size = i.len();
+    let short_header_size = mem::size_of::<XLogShortPageHeader>();
+    if start_size < short_header_size {
+        return Err(nom::Err::Incomplete(nom::Needed::new(
+            short_header_size - start_size,
+        )));
     }
-
     let (i, xlp_magic) = le_u16(i)?;
     if xlp_magic != XLP_MAGIC {
         return Err(nom::Err::Failure(XLogError::InvalidPageHeader));
     }
-
     let (i, xlp_info) = le_u16(i)?;
-    if xlp_info & XLP_LONG_HEADER > 0 {
-        return Err(nom::Err::Error(XLogError::IncorrectPageType));
-    }
-
     let (i, xlp_tli) = le_u32(i)?;
     let (i, xlp_pageaddr) = le_u64(i)?;
     let (i, xlp_rem_len) = le_u32(i)?;
-
-    debug!(
-        "Parsed a short page at {}, remaning length {}",
-        xlp_pageaddr, xlp_rem_len
-    );
-    let page_header = XLogShortPageHeader {
-        xlp_magic,
-        xlp_info,
-        xlp_tli,
-        xlp_pageaddr,
-        xlp_rem_len,
-    };
-
-    Ok((i, XLogPageHeader::from(page_header)))
-}
-
-pub fn parse_xlog_long_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, XLogError<&[u8]>> {
-    let header_size = mem::size_of::<XLogLongPageHeader>();
-    if i.len() < mem::size_of::<XLogLongPageHeader>() {
-        return Err(nom::Err::Incomplete(nom::Needed::new(header_size - i.len())));
-    }
-
-    let (i, xlp_magic) = le_u16(i)?;
-    if xlp_magic != XLP_MAGIC {
-        return Err(nom::Err::Failure(XLogError::InvalidPageHeader));
-    }
-
-    let (i, xlp_info) = le_u16(i)?;
-    if xlp_info & XLP_LONG_HEADER == 0 {
-        return Err(nom::Err::Error(XLogError::IncorrectPageType));
-    }
-
-    let (i, xlp_tli) = le_u32(i)?;
-    let (i, xlp_pageaddr) = le_u64(i)?;
-    let (i, xlp_rem_len) = le_u32(i)?;
-
-    debug!(
-        "Parsed a long page at {:#02x}, remaning length {}",
-        xlp_pageaddr, xlp_rem_len
-    );
     let std = XLogShortPageHeader {
         xlp_magic,
         xlp_info,
@@ -135,6 +122,18 @@ pub fn parse_xlog_long_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, X
         xlp_pageaddr,
         xlp_rem_len,
     };
+    if xlp_info & XLP_LONG_HEADER == 0 {
+        debug!("Parsed a short page header at {}, {}", xlp_pageaddr, std);
+        return Ok((i, XLogPageHeader::from(std)));
+    }
+
+    // We have a long page header
+    let long_header_size = mem::size_of::<XLogLongPageHeader>();
+    if start_size < long_header_size {
+        return Err(nom::Err::Incomplete(nom::Needed::new(
+            long_header_size - start_size,
+        )));
+    }
 
     // 4 bytes of memory padding
     let (i, _) = consume_padding(i, 4)?;
@@ -148,12 +147,11 @@ pub fn parse_xlog_long_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, X
         xlp_seg_size,
         xlp_xlog_blcksz,
     };
-
+    debug!(
+        "Parsed a long page header at {:#02x}, {}",
+        xlp_pageaddr, page_header
+    );
     Ok((i, XLogPageHeader::from(page_header)))
-}
-
-pub fn parse_xlog_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, XLogError<&[u8]>> {
-    branch::alt((parse_xlog_short_page_header, parse_xlog_long_page_header)).parse(i)
 }
 
 pub fn parse_xlog_page(i: &[u8]) -> IResult<&[u8], XLogPageContent, XLogError<&[u8]>> {
