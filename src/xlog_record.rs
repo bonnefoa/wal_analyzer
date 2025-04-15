@@ -183,15 +183,13 @@ pub fn parse_xlog_record_header(i: &[u8]) -> IResult<&[u8], XLogRecordHeader, XL
     let (i, xl_xid) = le_u32(i)?;
     let (i, xl_prev) = le_u64(i)?;
     let (i, xl_info) = le_u8(i)?;
-    let (i, rmid) = le_u8(i)?;
+    let (i, xl_rmid) = le_u8(i).map(|(i, x)| (i, RmgrId::from(x)))?;
     let (i, _) = consume_padding(i, 2)?;
     let (i, xl_crc) = le_u32(i)?;
     let data_len = (xl_tot_len - XLOG_RECORD_HEADER_SIZE) as usize;
     if i.len() < data_len {
         return Err(nom::Err::Incomplete(nom::Needed::new(data_len)));
     }
-
-    let xl_rmid = RmgrId::from(rmid);
 
     let record = XLogRecordHeader {
         xl_tot_len,
@@ -223,7 +221,7 @@ pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]
 
 pub fn parse_main_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogError<&[u8]>> {
     let (i, blk_id) = le_u8(i)?;
-    if blk_id != XLR_BLOCK_ID_DATA_SHORT && blk_id != XLR_BLOCK_ID_DATA_LONG {
+    if blk_id < XLR_BLOCK_ID_DATA_LONG {
         return Err(nom::Err::Error(XLogError::IncorrectId(blk_id)));
     }
 
