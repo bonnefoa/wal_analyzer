@@ -1,5 +1,5 @@
 use crate::error::XLogError;
-use crate::xlog_record::{parse_xlog_records, XLogRecord};
+use crate::xlog_record::{consume_padding, parse_xlog_records, XLogRecord};
 use log::debug;
 use nom::branch;
 use nom::combinator::map;
@@ -132,10 +132,11 @@ pub fn parse_xlog_long_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, X
     };
 
     // 4 bytes of memory padding
-    let (i, padding) = le_u32(i)?;
-    if padding != 0 {
-        return Err(nom::Err::Error(XLogError::IncorrectPaddingValue(padding)));
-    }
+    let (i, _) = consume_padding(i, 4)?;
+    // let (i, padding) = le_u32(i)?;
+    // if padding != 0 {
+    //     return Err(nom::Err::Error(XLogError::IncorrectPaddingValue(padding)));
+    // }
 
     let (i, xlp_sysid) = le_u64(i)?;
     let (i, xlp_seg_size) = le_u32(i)?;

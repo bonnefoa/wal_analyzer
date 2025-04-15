@@ -8,8 +8,11 @@ pub enum XLogError<I: Sized> {
     Eof,
     InvalidPageHeader,
     EmptyRecord,
+    EndBlock,
+    IncorrectId(u8),
     IncorrectPageType,
-    IncorrectPaddingValue(u32),
+    LeftoverBytes(Vec<u8>),
+    IncorrectPaddingValue(Vec<u8>),
     InvalidRecord(String),
 
     /// An error encountered during parsing
@@ -34,13 +37,20 @@ where
             XLogError::Eof => write!(f, "End of file"),
             XLogError::InvalidPageHeader => write!(f, "Invalid page header"),
             XLogError::EmptyRecord => write!(f, "Empty record"),
+            XLogError::EndBlock => write!(f, "End block"),
             XLogError::IncorrectPageType => write!(f, "Incorrect page type"),
+            XLogError::IncorrectId(u) => {
+                write!(f, "Incorrect id {:x?}", u)
+            }
+            XLogError::LeftoverBytes(leftover) => {
+                write!(f, "Leftover bytes {:x?}", leftover)
+            }
             XLogError::IncorrectPaddingValue(padding) => {
-                write!(f, "Incorrect padding value {:?}", padding)
+                write!(f, "Incorrect padding value {:x?}", padding)
             }
             XLogError::InvalidRecord(e) => write!(f, "Invalid XLog Record {:?}", e),
             XLogError::NomParseError(i, e) => {
-                write!(f, "Internal parser error {:?}, input {:?}", e, i)
+                write!(f, "Internal parser error {:?}, input {:x?}", e, i)
             }
         }
     }
