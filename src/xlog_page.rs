@@ -1,3 +1,5 @@
+use std::mem;
+
 use crate::error::XLogError;
 use crate::xlog_record::{consume_padding, parse_xlog_records, XLogRecord};
 use log::debug;
@@ -67,8 +69,10 @@ impl From<XLogLongPageHeader> for XLogPageHeader {
 }
 
 pub fn parse_xlog_short_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, XLogError<&[u8]>> {
-    if i.len() < 20 {
-        return Err(nom::Err::Incomplete(nom::Needed::new(20 - i.len())));
+    let header_size = mem::size_of::<XLogShortPageHeader>();
+
+    if i.len() < mem::size_of::<XLogShortPageHeader>() {
+        return Err(nom::Err::Incomplete(nom::Needed::new(header_size - i.len())));
     }
 
     let (i, xlp_magic) = le_u16(i)?;
@@ -101,8 +105,9 @@ pub fn parse_xlog_short_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, 
 }
 
 pub fn parse_xlog_long_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, XLogError<&[u8]>> {
-    if i.len() < 40 {
-        return Err(nom::Err::Incomplete(nom::Needed::new(40 - i.len())));
+    let header_size = mem::size_of::<XLogLongPageHeader>();
+    if i.len() < mem::size_of::<XLogLongPageHeader>() {
+        return Err(nom::Err::Incomplete(nom::Needed::new(header_size - i.len())));
     }
 
     let (i, xlp_magic) = le_u16(i)?;
@@ -133,11 +138,6 @@ pub fn parse_xlog_long_page_header(i: &[u8]) -> IResult<&[u8], XLogPageHeader, X
 
     // 4 bytes of memory padding
     let (i, _) = consume_padding(i, 4)?;
-    // let (i, padding) = le_u32(i)?;
-    // if padding != 0 {
-    //     return Err(nom::Err::Error(XLogError::IncorrectPaddingValue(padding)));
-    // }
-
     let (i, xlp_sysid) = le_u64(i)?;
     let (i, xlp_seg_size) = le_u32(i)?;
     let (i, xlp_xlog_blcksz) = le_u32(i)?;
