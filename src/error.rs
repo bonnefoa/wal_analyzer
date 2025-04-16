@@ -44,7 +44,7 @@ where
                 write!(f, "BKPBLOCK_HAS_DATA set, but not data included")
             }
             XLogError::UnexpectedBlockDataLen(d) => {
-                write!(f, "BKPBLOCK_HAS_DATA not set, but data length is %u", d)
+                write!(f, "BKPBLOCK_HAS_DATA not set, but data length is {}", d)
             }
             XLogError::IncorrectPageType => write!(f, "Incorrect page type"),
             XLogError::IncorrectId(u) => {
