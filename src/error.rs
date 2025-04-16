@@ -9,6 +9,8 @@ pub enum XLogError<I: Sized> {
     InvalidPageHeader,
     EmptyRecord,
     EndBlock,
+    MissingBlockDataLen,
+    UnexpectedBlockDataLen(u16),
     IncorrectId(u8),
     IncorrectPageType,
     LeftoverBytes(Vec<u8>),
@@ -38,6 +40,12 @@ where
             XLogError::InvalidPageHeader => write!(f, "Invalid page header"),
             XLogError::EmptyRecord => write!(f, "Empty record"),
             XLogError::EndBlock => write!(f, "End block"),
+            XLogError::MissingBlockDataLen => {
+                write!(f, "BKPBLOCK_HAS_DATA set, but not data included")
+            }
+            XLogError::UnexpectedBlockDataLen(d) => {
+                write!(f, "BKPBLOCK_HAS_DATA not set, but data length is %u", d)
+            }
             XLogError::IncorrectPageType => write!(f, "Incorrect page type"),
             XLogError::IncorrectId(u) => {
                 write!(f, "Incorrect id {:x?}", u)

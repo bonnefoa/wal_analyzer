@@ -1,9 +1,9 @@
 use crate::error::XLogError;
+use crate::xlog_block::{parse_block_headers, XLBData};
 use log::debug;
 use nom::bytes::complete::take;
-use nom::error::dbg_dmp;
 use nom::multi;
-use nom::number::complete::{le_u16, le_u32, le_u64, le_u8};
+use nom::number::complete::{le_u32, le_u64, le_u8};
 use nom::IResult;
 use nom::Parser;
 
@@ -96,17 +96,6 @@ impl std::fmt::Display for RmgrId {
 }
 
 pub const XLOG_RECORD_HEADER_SIZE: u32 = 24;
-pub const BKPBLOCK_FORK_MASK: u8 = 0x0F;
-pub const BKPBLOCK_FLAG_MASK: u8 = 0xF0;
-pub const BKPBLOCK_HAS_IMAGE: u8 = 0x10; /* block data is an XLogRecordBlockImage */
-pub const BKPBLOCK_HAS_DATA: u8 = 0x20;
-pub const BKPBLOCK_WILL_INIT: u8 = 0x40; /* redo will re-init the page */
-pub const BKPBLOCK_SAME_REL: u8 = 0x80; /* RelFileNode omitted, same as previous */
-
-pub const XLR_BLOCK_ID_TOPLEVEL_XID: u8 = 0xfc;
-pub const XLR_BLOCK_ID_ORIGIN: u8 = 0xfd;
-pub const XLR_BLOCK_ID_DATA_LONG: u8 = 0xfe;
-pub const XLR_BLOCK_ID_DATA_SHORT: u8 = 0xff;
 
 #[derive(Clone, Debug)]
 pub struct XLogRecord {
@@ -130,22 +119,11 @@ pub struct XLogRecordHeader {
     pub xl_crc: u32,
 }
 
-#[derive(Clone, Debug)]
-pub struct XLBData {
-    pub blk_id: u8,
-    pub fork_num: u8,
-    pub has_image: bool,
-    pub has_data: bool,
-    pub flags: u8,
-    pub data_len: u32,
-    pub data: Vec<u8>,
-}
-
 impl std::fmt::Display for XLogRecordHeader {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "rmgr: {}, len: {}, tx: {}, prev: {:08X}",
+            "rmgr: {}, len: {}, tx: {}, prev: 0x{:08X}",
             self.xl_rmid, self.xl_tot_len, self.xl_xid, self.xl_prev
         )
     }
@@ -217,63 +195,6 @@ pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]
     let (i, _) = consume_padding(input, input.len() % 8)?;
 
     Ok((i, XLogRecord { header, blocks }))
-}
-
-pub fn parse_main_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogError<&[u8]>> {
-    let (i, blk_id) = le_u8(i)?;
-    if blk_id < XLR_BLOCK_ID_DATA_LONG {
-        return Err(nom::Err::Error(XLogError::IncorrectId(blk_id)));
-    }
-
-    let (i, data_len) = if blk_id == XLR_BLOCK_ID_DATA_SHORT {
-        le_u8(i).map(|(i, x)| (i, u32::from(x)))?
-    } else {
-        le_u16(i).map(|(i, x)| (i, u32::from(x)))?
-    };
-
-    let data = vec![0; data_len as usize];
-    let block_header = XLBData {
-        blk_id,
-        fork_num: 0,
-        flags: 0,
-        has_image: false,
-        has_data: true,
-        data_len,
-        data,
-    };
-    Ok((i, block_header))
-}
-
-pub fn parse_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogError<&[u8]>> {
-    let (i, blk_id) = le_u8(i)?;
-    if blk_id == 0xff {
-        return Err(nom::Err::Error(XLogError::EndBlock));
-    }
-
-    let (i, fork_flags) = le_u8(i)?;
-    let fork_num = fork_flags & BKPBLOCK_FORK_MASK;
-    let flags = fork_flags & BKPBLOCK_FLAG_MASK;
-    let has_image = fork_flags & BKPBLOCK_HAS_IMAGE > 0;
-    let has_data = fork_flags & BKPBLOCK_HAS_DATA > 0;
-    let (i, data_len) = le_u16(i)?;
-    let data = vec![0; data_len as usize];
-    let block = XLBData {
-        blk_id,
-        fork_num,
-        flags,
-        has_image,
-        has_data,
-        data_len: data_len as u32,
-        data,
-    };
-    Ok((i, block))
-}
-
-pub fn parse_block_headers(i: &[u8]) -> IResult<&[u8], Vec<XLBData>, XLogError<&[u8]>> {
-    let (i, mut data_blocks) = multi::many0(parse_data_block_header).parse(i)?;
-    let (i, main_data) = parse_main_data_block_header(i)?;
-    data_blocks.push(main_data);
-    Ok((i, data_blocks))
 }
 
 pub fn parse_xlog_records(i: &[u8]) -> IResult<&[u8], Vec<XLogRecord>, XLogError<&[u8]>> {

@@ -25,6 +25,7 @@ nom = "8.0.0"
 hex-literal = "1.0.0"
 log = "0.4.27"
 env_logger = "0.11.8"
+ctor = "0.4.1"
 
 [[bin]]
 name = "wal_analyzer"
