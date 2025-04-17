@@ -10,13 +10,15 @@ pub enum XLogError<I: Sized> {
     EmptyRecord,
     EndBlock,
     MissingBlockDataLen,
-    InvalidBlockId(u8, u8),
+    InvalidBlockId(Option<u8>, u8),
     OutOfOrderBlock,
     UnexpectedBlockDataLen(u16),
     IncorrectId(u8),
     IncorrectPageType,
+    InvalidDataLen(usize, usize),
     LeftoverBytes(Vec<u8>),
     IncorrectPaddingValue(Vec<u8>),
+    IncorrectPaddingLength(usize),
     InvalidRecord(String),
 
     /// An error encountered during parsing
@@ -44,7 +46,7 @@ where
             XLogError::EndBlock => write!(f, "End block"),
             XLogError::InvalidBlockId(previous, current) => write!(
                 f,
-                "Invalid block id, previous blk {}, current {}",
+                "Invalid block id, previous blk {:?}, current {}",
                 previous, current
             ),
             XLogError::OutOfOrderBlock => write!(f, "Out of order block"),
@@ -64,10 +66,18 @@ where
             XLogError::IncorrectPaddingValue(padding) => {
                 write!(f, "Incorrect padding value {:x?}", padding)
             }
+            XLogError::IncorrectPaddingLength(length) => {
+                write!(f, "Incorrect padding length {}", length)
+            }
             XLogError::InvalidRecord(e) => write!(f, "Invalid XLog Record {:?}", e),
             XLogError::NomParseError(i, e) => {
                 write!(f, "Internal parser error {:?}, input {:x?}", e, i)
             }
+            XLogError::InvalidDataLen(consumed, expected) => write!(
+                f,
+                "Invalid data len, consumed {}, expected {}",
+                consumed, expected
+            ),
         }
     }
 }

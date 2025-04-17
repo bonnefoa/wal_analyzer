@@ -40,9 +40,9 @@ pub struct XLBData {
 
 impl std::fmt::Display for XLBData {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "blk_id: 0x{:X}, fork_num: {}, has_image: {}, has_data: {}, flags: 0x{:X}, data_len: {}, data: {:X?}",
+        write!(f, "blk_id: 0x{:X}, fork_num: {}, has_image: {}, has_data: {}, flags: 0x{:X}, rnode: {:?}, data_len: {}, data: {:X?}",
             self.blk_id, self.fork_num, self.has_image, self.has_data,
-            self.flags, self.data_len, self.data)
+            self.flags, self.rnode, self.data_len, self.data)
     }
 }
 
@@ -71,6 +71,7 @@ pub fn parse_main_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogErr
         blkno: 0,
         data,
     };
+    debug!("Parsed main block header {}", block_header);
     Ok((i, block_header))
 }
 
@@ -83,10 +84,9 @@ pub fn parse_data_block_header<'a>(
         return Err(nom::Err::Error(XLogError::EndBlock));
     }
     // We expect the block_id to be ordered, starting with 0
-    let expected_blk_id = previous_block.map_or(0, |x| x.blk_id + 1);
-    if blk_id != expected_blk_id {
+    if previous_block.is_some_and(|x| blk_id <= x.blk_id) {
         return Err(nom::Err::Error(XLogError::InvalidBlockId(
-            expected_blk_id,
+            previous_block.map(|x| x.blk_id),
             blk_id,
         )));
     }
@@ -167,6 +167,7 @@ pub fn parse_blocks(i: &[u8]) -> IResult<&[u8], Vec<XLBData>, XLogError<&[u8]>> 
     for block in &mut blocks {
         let (i, data) = take(block.data_len)(input)?;
         input = i;
+        debug!("Data for block {}: {:X?}", block.blkno, data);
         block.data.copy_from_slice(data);
     }
 

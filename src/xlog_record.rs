@@ -136,7 +136,14 @@ impl std::fmt::Display for XLogRecord {
 }
 
 pub fn consume_padding(i: &[u8], size: usize) -> IResult<&[u8], (), XLogError<&[u8]>> {
+    if size == 0 {
+        return Ok((i, ()));
+    }
     let (i, padding) = take(size)(i)?;
+    debug!("Consumed padding {} from input of size {}", size, i.len());
+    if size > 8 {
+        return Err(nom::Err::Error(XLogError::IncorrectPaddingLength(size)));
+    }
     if padding.iter().all(|x| *x != 0) {
         return Err(nom::Err::Error(XLogError::IncorrectPaddingValue(
             padding.to_owned(),
@@ -177,23 +184,28 @@ pub fn parse_xlog_record_header(i: &[u8]) -> IResult<&[u8], XLogRecordHeader, XL
         xl_rmid,
         xl_crc,
     };
-    debug!("Parsed record {}", record);
+    debug!("Parsed record header {}", record);
     Ok((i, record))
 }
 
+/// Parse record header, block headers and block contents
 pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]>> {
     let (i, header) = parse_xlog_record_header(i)?;
-    let (i, mut blocks) = parse_blocks(i)?;
 
-    let mut input = i;
-    for data_block in &mut blocks {
-        let (i, data) = take(data_block.data_len)(input)?;
-        input = i;
-        data_block.data.clone_from_slice(data);
+    // Create a subslice with block headers and data
+    let record_length = (header.xl_tot_len - XLOG_RECORD_HEADER_SIZE) as usize;
+    let block_bytes = &i[..record_length];
+
+    let (block_bytes, blocks) = parse_blocks(block_bytes)?;
+    if !block_bytes.is_empty() {
+        return Err(nom::Err::Error(XLogError::LeftoverBytes(
+            block_bytes.to_owned(),
+        )));
     }
 
-    let (i, _) = consume_padding(input, input.len() % 8)?;
-
+    // Padding needs to be consumed
+    let i = &i[record_length..];
+    let (i, _) = consume_padding(i, i.len() % 8)?;
     Ok((i, XLogRecord { header, blocks }))
 }
 

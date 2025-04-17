@@ -11,7 +11,7 @@ fn test_parse_heap_block() {
     //  block 1:
     //    id: \x00
     //    flags: \x60
-    //    data_len: \x0a\x00 (SAME_REL)
+    //    data_len: \x0a\x00
     //    RelFileNode (12 bytes): \x7f\x06\x00\x00\xb0\x32\x00\x00\x16\x40\x00\x00
     //    BlockNo (4 bytes): \x00\x00\x00\x00
     //
