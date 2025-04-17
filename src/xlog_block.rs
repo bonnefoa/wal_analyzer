@@ -1,9 +1,8 @@
 use crate::error::XLogError;
 use log::debug;
-use nom::multi;
+use nom::bytes::complete::take;
 use nom::number::complete::{le_u16, le_u32, le_u8};
 use nom::IResult;
-use nom::Parser;
 
 pub const BKPBLOCK_FORK_MASK: u8 = 0x0F;
 pub const BKPBLOCK_FLAG_MASK: u8 = 0xF0;
@@ -19,7 +18,7 @@ pub const XLR_BLOCK_ID_DATA_SHORT: u8 = 0xff;
 
 pub const XLR_MAX_BLOCK_ID: u8 = 32;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct RelFileNode {
     pub spc_node: u32,
     pub db_node: u32,
@@ -34,10 +33,10 @@ pub struct XLBData {
     pub has_data: bool,
     pub flags: u8,
     pub data_len: u32,
+    pub rnode: Option<RelFileNode>,
+    pub blkno: u32,
     pub data: Vec<u8>,
 }
-
-static mut RNODE: Option<RelFileNode> = None;
 
 impl std::fmt::Display for XLBData {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -50,6 +49,7 @@ impl std::fmt::Display for XLBData {
 pub fn parse_main_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogError<&[u8]>> {
     let (i, blk_id) = le_u8(i)?;
     if blk_id < XLR_BLOCK_ID_DATA_LONG {
+        // Not a main block header, exit
         return Err(nom::Err::Error(XLogError::IncorrectId(blk_id)));
     }
 
@@ -67,15 +67,28 @@ pub fn parse_main_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogErr
         has_image: false,
         has_data: true,
         data_len,
+        rnode: None,
+        blkno: 0,
         data,
     };
     Ok((i, block_header))
 }
 
-pub fn parse_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogError<&[u8]>> {
+pub fn parse_data_block_header<'a>(
+    previous_block: Option<&XLBData>,
+    i: &'a [u8],
+) -> IResult<&'a [u8], XLBData, XLogError<&'a [u8]>> {
     let (i, blk_id) = le_u8(i)?;
     if blk_id > XLR_MAX_BLOCK_ID {
         return Err(nom::Err::Error(XLogError::EndBlock));
+    }
+    // We expect the block_id to be ordered, starting with 0
+    let expected_blk_id = previous_block.map_or(0, |x| x.blk_id + 1);
+    if blk_id != expected_blk_id {
+        return Err(nom::Err::Error(XLogError::InvalidBlockId(
+            expected_blk_id,
+            blk_id,
+        )));
     }
 
     let (i, fork_flags) = le_u8(i)?;
@@ -98,7 +111,12 @@ pub fn parse_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogError<&[
     }
 
     let (i, rnode) = if fork_flags & BKPBLOCK_SAME_REL > 0 {
-        todo!("REUSE RNODE");
+        match previous_block {
+            // No previous block
+            None => return Err(nom::Err::Error(XLogError::OutOfOrderBlock)),
+            // Return previous relnode
+            Some(blk) => (i, blk.rnode),
+        }
     } else {
         let (i, spc_node) = le_u32(i)?;
         let (i, db_node) = le_u32(i)?;
@@ -108,9 +126,10 @@ pub fn parse_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogError<&[
             db_node,
             rel_node,
         };
-        (i, rnode)
+        (i, Some(rnode))
     };
 
+    let (i, blkno) = le_u32(i)?;
     let data = vec![0; data_len as usize];
     let block = XLBData {
         blk_id,
@@ -119,15 +138,37 @@ pub fn parse_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogError<&[
         has_image,
         has_data,
         data_len: data_len as u32,
+        rnode,
+        blkno,
         data,
     };
     debug!("Parsed block header {}", block);
     Ok((i, block))
 }
 
-pub fn parse_block_headers(i: &[u8]) -> IResult<&[u8], Vec<XLBData>, XLogError<&[u8]>> {
-    let (i, mut data_blocks) = multi::many0(parse_data_block_header).parse(i)?;
-    let (i, main_data) = parse_main_data_block_header(i)?;
-    data_blocks.push(main_data);
-    Ok((i, data_blocks))
+pub fn parse_blocks(i: &[u8]) -> IResult<&[u8], Vec<XLBData>, XLogError<&[u8]>> {
+    let mut blocks = Vec::new();
+    let mut input = i;
+    loop {
+        match parse_data_block_header(blocks.last(), input) {
+            Ok((i, block)) => {
+                blocks.push(block);
+                input = i;
+            }
+            Err(nom::Err::Error(XLogError::EndBlock)) => break,
+            Err(e) => return Err(e),
+        }
+    }
+    let (i, main_block) = parse_main_data_block_header(input)?;
+    input = i;
+    blocks.push(main_block);
+
+    // We've reached the block's data
+    for block in &mut blocks {
+        let (i, data) = take(block.data_len)(input)?;
+        input = i;
+        block.data.copy_from_slice(data);
+    }
+
+    Ok((input, blocks))
 }

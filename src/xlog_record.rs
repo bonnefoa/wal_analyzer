@@ -1,5 +1,5 @@
 use crate::error::XLogError;
-use crate::xlog_block::{parse_block_headers, XLBData};
+use crate::xlog_block::{parse_blocks, XLBData};
 use log::debug;
 use nom::bytes::complete::take;
 use nom::multi;
@@ -183,7 +183,7 @@ pub fn parse_xlog_record_header(i: &[u8]) -> IResult<&[u8], XLogRecordHeader, XL
 
 pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]>> {
     let (i, header) = parse_xlog_record_header(i)?;
-    let (i, mut blocks) = parse_block_headers(i)?;
+    let (i, mut blocks) = parse_blocks(i)?;
 
     let mut input = i;
     for data_block in &mut blocks {

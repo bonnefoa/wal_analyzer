@@ -4,6 +4,12 @@ use wal_analyzer::{
     xlog_record::{parse_xlog_record, RmgrId},
 };
 
+#[cfg(test)]
+#[ctor::ctor]
+fn init() {
+    env_logger::init();
+}
+
 #[test]
 fn test_parse_filename() {
     let input = "000000010000000000000002";
