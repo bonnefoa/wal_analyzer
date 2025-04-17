@@ -38,11 +38,28 @@ pub struct XLBData {
     pub data: Vec<u8>,
 }
 
+impl std::fmt::Display for RelFileNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}/{}/{}", self.spc_node, self.db_node, self.rel_node)
+    }
+}
+
 impl std::fmt::Display for XLBData {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "blk_id: 0x{:X}, fork_num: {}, has_image: {}, has_data: {}, flags: 0x{:X}, rnode: {:?}, data_len: {}, data: {:X?}",
+        let rnode_str = self
+            .rnode
+            .map_or(String::from(""), |x| format!("rnode: {}, ", x));
+        if self.blk_id < XLR_MAX_BLOCK_ID {
+            write!(f, "blk_id: 0x{:X}, fork_num: {}, has_image: {}, has_data: {}, flags: 0x{:X}, {}data_len: {}",
             self.blk_id, self.fork_num, self.has_image, self.has_data,
-            self.flags, self.rnode, self.data_len, self.data)
+            self.flags, rnode_str, self.data_len)
+        } else {
+            write!(
+                f,
+                "blk_id: 0x{:X}, data_len: {}",
+                self.blk_id, self.data_len
+            )
+        }
     }
 }
 

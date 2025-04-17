@@ -131,7 +131,11 @@ impl std::fmt::Display for XLogRecordHeader {
 
 impl std::fmt::Display for XLogRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.header)
+        writeln!(f, "{}", self.header)?;
+        for block in &self.blocks {
+            writeln!(f, " {}", block)?;
+        }
+        Ok(())
     }
 }
 
