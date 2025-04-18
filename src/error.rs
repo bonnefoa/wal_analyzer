@@ -10,6 +10,7 @@ pub enum XLogError<I: Sized> {
     EmptyRecord,
     EndBlock,
     MissingBlockDataLen,
+    InvalidBlockImageHole(u16, u16, u16),
     InvalidBlockId(Option<u8>, u8),
     OutOfOrderBlock,
     UnexpectedBlockDataLen(u16),
@@ -44,6 +45,13 @@ where
             XLogError::InvalidPageHeader => write!(f, "Invalid page header"),
             XLogError::EmptyRecord => write!(f, "Empty record"),
             XLogError::EndBlock => write!(f, "End block"),
+            XLogError::InvalidBlockImageHole(hole_offset, hole_length, bimg_len) => {
+                write!(
+                    f,
+                    "BKPIMAGE_HAS_HOLE set, but hole offset {}, length {}, length {}",
+                    hole_offset, hole_length, bimg_len
+                )
+            }
             XLogError::InvalidBlockId(previous, current) => write!(
                 f,
                 "Invalid block id, previous blk {:?}, current {}",

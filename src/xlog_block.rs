@@ -16,6 +16,14 @@ pub const XLR_BLOCK_ID_ORIGIN: u8 = 0xfd;
 pub const XLR_BLOCK_ID_DATA_LONG: u8 = 0xfe;
 pub const XLR_BLOCK_ID_DATA_SHORT: u8 = 0xff;
 
+/// page image has "hole"
+const BKPIMAGE_HAS_HOLE: u8 = 0x01;
+///page image is compressed
+const BKPIMAGE_IS_COMPRESSED: u8 = 0x02;
+///page image should be restored during replay
+const BKPIMAGE_APPLY: u8 = 0x04;
+pub const BLCKSZ: u16 = 8192;
+
 pub const XLR_MAX_BLOCK_ID: u8 = 32;
 
 #[derive(Clone, Copy, Debug)]
@@ -25,17 +33,36 @@ pub struct RelFileNode {
     pub rel_node: u32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
+pub struct XLBImage {
+    /// has image that should be restored
+    pub apply_image: bool,
+    pub hole_offset: u16,
+    pub hole_length: u16,
+    pub bimg_len: u16,
+    pub bimg_info: u8,
+    pub bkp_image: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
 pub struct XLBData {
     pub blk_id: u8,
-    pub fork_num: u8,
-    pub has_image: bool,
-    pub has_data: bool,
-    pub flags: u8,
-    pub data_len: u32,
+
+    // Identify the block this refers to
     pub rnode: Option<RelFileNode>,
     pub blkno: u32,
-    pub data: Vec<u8>,
+    pub fork_num: u8,
+
+    // Copy of fork_flags field from the block header
+    pub flags: u8,
+
+    // Information on full-page image, if any
+    pub image: Option<XLBImage>,
+
+    pub has_data: bool,
+    pub data_len: u16,
+    pub data_bufsz: u16,
+    pub data: Option<Vec<u8>>,
 }
 
 impl std::fmt::Display for RelFileNode {
@@ -44,15 +71,38 @@ impl std::fmt::Display for RelFileNode {
     }
 }
 
+impl std::fmt::Display for XLBImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "apply_image: {}, hole_offset: {}, hole_length: {}, len: {}, info: 0x{:X}",
+            self.apply_image, self.hole_offset, self.hole_length, self.bimg_len, self.bimg_info
+        )
+    }
+}
+
 impl std::fmt::Display for XLBData {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let rnode_str = self
             .rnode
+            .as_ref()
             .map_or(String::from(""), |x| format!("rnode: {}, ", x));
+        let image_str = self
+            .image
+            .as_ref()
+            .map_or(String::from(""), |x| format!("image: {}, ", x));
         if self.blk_id < XLR_MAX_BLOCK_ID {
-            write!(f, "blk_id: 0x{:X}, fork_num: {}, has_image: {}, has_data: {}, flags: 0x{:X}, {}data_len: {}",
-            self.blk_id, self.fork_num, self.has_image, self.has_data,
-            self.flags, rnode_str, self.data_len)
+            write!(
+                f,
+                "blk_id: 0x{:X}, fork_num: {}, {}has_data: {}, flags: 0x{:X}, {}data_len: {}",
+                self.blk_id,
+                self.fork_num,
+                image_str,
+                self.has_data,
+                self.flags,
+                rnode_str,
+                self.data_len
+            )
         } else {
             write!(
                 f,
@@ -71,25 +121,75 @@ pub fn parse_main_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogErr
     }
 
     let (i, data_len) = if blk_id == XLR_BLOCK_ID_DATA_SHORT {
-        le_u8(i).map(|(i, x)| (i, u32::from(x)))?
+        le_u8(i).map(|(i, x)| (i, u16::from(x)))?
     } else {
-        le_u16(i).map(|(i, x)| (i, u32::from(x)))?
+        le_u16(i)?
     };
 
-    let data = vec![0; data_len as usize];
+    let data = Some(vec![0; data_len as usize]);
     let block_header = XLBData {
         blk_id,
-        fork_num: 0,
-        flags: 0,
-        has_image: false,
-        has_data: true,
-        data_len,
         rnode: None,
         blkno: 0,
+        fork_num: 0,
+        flags: 0,
+        image: None,
+        has_data: true,
+        data_len,
+        data_bufsz: 0,
         data,
     };
     debug!("Parsed main block header {}", block_header);
     Ok((i, block_header))
+}
+
+fn parse_relfilenode(i: &[u8]) -> IResult<&[u8], RelFileNode, XLogError<&[u8]>> {
+    let (i, spc_node) = le_u32(i)?;
+    let (i, db_node) = le_u32(i)?;
+    let (i, rel_node) = le_u32(i)?;
+    let rnode = RelFileNode {
+        spc_node,
+        db_node,
+        rel_node,
+    };
+    Ok((i, rnode))
+}
+
+fn parse_block_image(i: &[u8]) -> IResult<&[u8], XLBImage, XLogError<&[u8]>> {
+    let (i, bimg_len) = le_u16(i)?;
+    let (i, hole_offset) = le_u16(i)?;
+    let (i, bimg_info) = le_u8(i)?;
+
+    let apply_image = (bimg_info & BKPIMAGE_APPLY) != 0;
+    let is_compressed = (bimg_info & BKPIMAGE_IS_COMPRESSED) != 0;
+    let has_hole = (bimg_info & BKPIMAGE_HAS_HOLE) != 0;
+    let (i, hole_length) = if is_compressed {
+        if has_hole {
+            le_u16(i)?
+        } else {
+            (i, 0)
+        }
+    } else {
+        (i, BLCKSZ - bimg_len)
+    };
+
+    if has_hole && (hole_offset == 0 || hole_length == 0 || bimg_len == BLCKSZ) {
+        return Err(nom::Err::Error(XLogError::InvalidBlockImageHole(
+            hole_offset,
+            hole_length,
+            bimg_len,
+        )));
+    }
+    let bkp_image = vec![0; bimg_len as usize];
+    let xlb_image = XLBImage {
+        apply_image,
+        hole_offset,
+        hole_length,
+        bimg_len,
+        bimg_info,
+        bkp_image,
+    };
+    Ok((i, xlb_image))
 }
 
 pub fn parse_data_block_header<'a>(
@@ -100,6 +200,7 @@ pub fn parse_data_block_header<'a>(
     if blk_id > XLR_MAX_BLOCK_ID {
         return Err(nom::Err::Error(XLogError::EndBlock));
     }
+
     // We expect the block_id to be ordered, starting with 0
     if previous_block.is_some_and(|x| blk_id <= x.blk_id) {
         return Err(nom::Err::Error(XLogError::InvalidBlockId(
@@ -123,11 +224,13 @@ pub fn parse_data_block_header<'a>(
         return Err(nom::Err::Error(XLogError::UnexpectedBlockDataLen(data_len)));
     }
 
-    if has_image {
-        todo!("HANDLE BLOCK IMAGE");
-    }
+    let (i, image) = if has_image {
+        parse_block_image(i).map(|(i, img)| (i, Some(img)))?
+    } else {
+        (i, None)
+    };
 
-    let (i, rnode) = if fork_flags & BKPBLOCK_SAME_REL > 0 {
+    let (i, rnode) = if fork_flags & BKPBLOCK_SAME_REL != 0 {
         match previous_block {
             // No previous block
             None => return Err(nom::Err::Error(XLogError::OutOfOrderBlock)),
@@ -135,28 +238,21 @@ pub fn parse_data_block_header<'a>(
             Some(blk) => (i, blk.rnode),
         }
     } else {
-        let (i, spc_node) = le_u32(i)?;
-        let (i, db_node) = le_u32(i)?;
-        let (i, rel_node) = le_u32(i)?;
-        let rnode = RelFileNode {
-            spc_node,
-            db_node,
-            rel_node,
-        };
-        (i, Some(rnode))
+        parse_relfilenode(i).map(|(i, r)| (i, Some(r)))?
     };
 
     let (i, blkno) = le_u32(i)?;
-    let data = vec![0; data_len as usize];
+    let data = Some(vec![0; data_len as usize]);
     let block = XLBData {
         blk_id,
-        fork_num,
-        flags,
-        has_image,
-        has_data,
-        data_len: data_len as u32,
         rnode,
         blkno,
+        fork_num,
+        flags,
+        image,
+        has_data,
+        data_len,
+        data_bufsz: 0,
         data,
     };
     debug!("Parsed block header {}", block);
@@ -182,10 +278,24 @@ pub fn parse_blocks(i: &[u8]) -> IResult<&[u8], Vec<XLBData>, XLogError<&[u8]>> 
 
     // We've reached the block's data
     for block in &mut blocks {
+        // Fetch image data first
+        input = match &mut block.image {
+            Some(image) => {
+                let (i, data) = take(image.bimg_len)(input)?;
+                image.bkp_image.copy_from_slice(data);
+                i
+            }
+            None => input,
+        };
+
         let (i, data) = take(block.data_len)(input)?;
         input = i;
         debug!("Data for block {}: {:X?}", block.blkno, data);
-        block.data.copy_from_slice(data);
+        if let Some(block_data) = block.data.as_mut() {
+            block_data.copy_from_slice(data);
+        } else {
+            return Err(nom::Err::Error(XLogError::EmptyRecord));
+        }
     }
 
     Ok((input, blocks))
