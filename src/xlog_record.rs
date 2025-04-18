@@ -1,3 +1,5 @@
+use std::mem;
+
 use crate::error::XLogError;
 use crate::xlog_block::{parse_blocks, XLBData};
 use log::debug;
@@ -95,7 +97,7 @@ impl std::fmt::Display for RmgrId {
     }
 }
 
-pub const XLOG_RECORD_HEADER_SIZE: u32 = 24;
+pub const XLOG_RECORD_HEADER_SIZE: usize = mem::size_of::<XLogRecordHeader>();
 
 #[derive(Clone, Debug)]
 pub struct XLogRecord {
@@ -157,7 +159,7 @@ pub fn consume_padding(i: &[u8], size: usize) -> IResult<&[u8], (), XLogError<&[
 }
 
 pub fn parse_xlog_record_header(i: &[u8]) -> IResult<&[u8], XLogRecordHeader, XLogError<&[u8]>> {
-    let header_size = XLOG_RECORD_HEADER_SIZE as usize;
+    let header_size = XLOG_RECORD_HEADER_SIZE;
     if i.len() < header_size {
         return Err(nom::Err::Incomplete(nom::Needed::new(
             header_size - i.len(),
@@ -175,7 +177,7 @@ pub fn parse_xlog_record_header(i: &[u8]) -> IResult<&[u8], XLogRecordHeader, XL
     let (i, xl_rmid) = le_u8(i).map(|(i, x)| (i, RmgrId::from(x)))?;
     let (i, _) = consume_padding(i, 2)?;
     let (i, xl_crc) = le_u32(i)?;
-    let data_len = (xl_tot_len - XLOG_RECORD_HEADER_SIZE) as usize;
+    let data_len = xl_tot_len as usize - XLOG_RECORD_HEADER_SIZE;
     if i.len() < data_len {
         return Err(nom::Err::Incomplete(nom::Needed::new(data_len)));
     }
@@ -197,7 +199,7 @@ pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]
     let (i, header) = parse_xlog_record_header(i)?;
 
     // Create a subslice with block headers and data
-    let record_length = (header.xl_tot_len - XLOG_RECORD_HEADER_SIZE) as usize;
+    let record_length = header.xl_tot_len as usize - XLOG_RECORD_HEADER_SIZE;
     let block_bytes = &i[..record_length];
 
     let (block_bytes, blocks) = parse_blocks(block_bytes)?;
