@@ -61,7 +61,6 @@ pub struct XLBData {
 
     pub has_data: bool,
     pub data_len: u16,
-    pub data_bufsz: u16,
     pub data: Option<Vec<u8>>,
 }
 
@@ -136,7 +135,6 @@ pub fn parse_main_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogErr
         image: None,
         has_data: true,
         data_len,
-        data_bufsz: 0,
         data,
     };
     debug!("Parsed main block header {}", block_header);
@@ -189,6 +187,7 @@ fn parse_block_image(i: &[u8]) -> IResult<&[u8], XLBImage, XLogError<&[u8]>> {
         bimg_info,
         bkp_image,
     };
+    debug!("Parsed block image {:?}", xlb_image);
     Ok((i, xlb_image))
 }
 
@@ -252,7 +251,6 @@ pub fn parse_data_block_header<'a>(
         image,
         has_data,
         data_len,
-        data_bufsz: 0,
         data,
     };
     debug!("Parsed block header {}", block);
