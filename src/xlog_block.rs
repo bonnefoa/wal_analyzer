@@ -62,7 +62,7 @@ impl std::fmt::Display for ForkNumber {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RelFileLocator {
     pub spc_node: u32,
     pub db_node: u32,
@@ -96,14 +96,29 @@ impl std::fmt::Display for XLBImage {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct PageId {
+    pub locator: RelFileLocator,
+    pub blockno: BlockNumber,
+    pub fork: ForkNumber,
+}
+
+impl std::fmt::Display for PageId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "locator: {}, blockno{}, fork: {}",
+            self.locator, self.blockno, self.fork
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct XLBData {
     pub blk_id: u8,
 
     // Identify the block this refers to
-    pub rnode: Option<RelFileLocator>,
-    pub blkno: BlockNumber,
-    pub fork_num: Option<ForkNumber>,
+    pub pageId: Option<PageId>,
 
     // Copy of fork_flags field from the block header
     pub flags: u8,
@@ -111,6 +126,7 @@ pub struct XLBData {
     // Information on full-page image, if any
     pub image: Option<XLBImage>,
 
+    // TODO: Probably redundant
     pub has_data: bool,
     pub data_len: u16,
     pub data: Option<Vec<u8>>,
@@ -118,29 +134,19 @@ pub struct XLBData {
 
 impl std::fmt::Display for XLBData {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let rnode_str = self
-            .rnode
+        let pageid_str = self
+            .pageId
             .as_ref()
-            .map_or(String::from(""), |x| format!("rnode: {}, ", x));
+            .map_or(String::from(""), |x| format!("page: {}, ", x));
         let image_str = self
             .image
             .as_ref()
             .map_or(String::from(""), |x| format!("image: {}, ", x));
-        let fork_str = self
-            .fork_num
-            .as_ref()
-            .map_or(String::from(""), |x| format!("fork: {}, ", x));
         if self.blk_id < XLR_MAX_BLOCK_ID {
             write!(
                 f,
-                "blk_id: 0x{:X}, {}{}has_data: {}, flags: 0x{:X}, {}data_len: {}",
-                self.blk_id,
-                fork_str,
-                image_str,
-                self.has_data,
-                self.flags,
-                rnode_str,
-                self.data_len
+                "blk_id: 0x{:X}, {}{}flags: 0x{:X}, data_len: {}",
+                self.blk_id, pageid_str, image_str, self.flags, self.data_len
             )
         } else {
             write!(
@@ -168,9 +174,7 @@ fn parse_main_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogError<&
     let data = Some(vec![0; data_len as usize]);
     let block_header = XLBData {
         blk_id,
-        rnode: None,
-        blkno: 0,
-        fork_num: None,
+        pageId: None,
         flags: 0,
         image: None,
         has_data: true,
@@ -249,8 +253,8 @@ fn parse_data_block_header<'a>(
     }
 
     let (i, fork_flags) = le_u8(i)?;
-    let fork_num = match ForkNumber::try_from(fork_flags & BKPBLOCK_FORK_MASK) {
-        Ok(fork_num) => Some(fork_num),
+    let fork = match ForkNumber::try_from(fork_flags & BKPBLOCK_FORK_MASK) {
+        Ok(fork) => fork,
         Err(f) => return Err(nom::Err::Error(XLogError::InvalidForkNumber(f))),
     };
     let flags = fork_flags & BKPBLOCK_FLAG_MASK;
@@ -272,24 +276,30 @@ fn parse_data_block_header<'a>(
         (i, None)
     };
 
-    let (i, rnode) = if fork_flags & BKPBLOCK_SAME_REL != 0 {
+    let (i, locator) = if fork_flags & BKPBLOCK_SAME_REL != 0 {
         match previous_block {
             // No previous block
             None => return Err(nom::Err::Error(XLogError::OutOfOrderBlock)),
             // Return previous relnode
-            Some(blk) => (i, blk.rnode),
+            Some(blk) => match &blk.pageId {
+                Some(pageId) => (i, pageId.locator),
+                None => return Err(nom::Err::Error(XLogError::OutOfOrderBlock)),
+            },
         }
     } else {
-        parse_relfilenode(i).map(|(i, r)| (i, Some(r)))?
+        parse_relfilenode(i)?
     };
 
-    let (i, blkno) = le_u32(i)?;
+    let (i, blockno) = le_u32(i)?;
+    let pageId = Some(PageId {
+        locator,
+        blockno,
+        fork,
+    });
     let data = Some(vec![0; data_len as usize]);
     let block = XLBData {
         blk_id,
-        rnode,
-        blkno,
-        fork_num,
+        pageId,
         flags,
         image,
         has_data,
@@ -331,7 +341,7 @@ pub fn parse_blocks(i: &[u8]) -> IResult<&[u8], Vec<XLBData>, XLogError<&[u8]>> 
 
         let (i, data) = take(block.data_len)(input)?;
         input = i;
-        debug!("Data for block {}: {:X?}", block.blkno, data);
+        debug!("Data for block {:?}: {:X?}", block.pageId, data);
         if let Some(block_data) = block.data.as_mut() {
             block_data.copy_from_slice(data);
         } else {
