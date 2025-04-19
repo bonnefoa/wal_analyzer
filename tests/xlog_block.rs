@@ -1,4 +1,4 @@
-use wal_analyzer::xlog_block::parse_blocks;
+use wal_analyzer::xlog_block::{parse_blocks, ForkNumber};
 
 #[cfg(test)]
 #[ctor::ctor]
@@ -38,7 +38,7 @@ fn test_parse_heap_block() {
     let block = &blocks[0];
 
     assert_eq!(block.blk_id, 0);
-    assert_eq!(block.fork_num, 0);
+    assert_eq!(block.fork_num, Some(ForkNumber::Main));
     assert_eq!(block.flags, 0x60);
     assert_eq!(block.data_len, 0x0a);
 

@@ -22,15 +22,57 @@ const BKPIMAGE_HAS_HOLE: u8 = 0x01;
 const BKPIMAGE_IS_COMPRESSED: u8 = 0x02;
 ///page image should be restored during replay
 const BKPIMAGE_APPLY: u8 = 0x04;
-pub const BLCKSZ: u16 = 8192;
+const XLR_MAX_BLOCK_ID: u8 = 32;
 
-pub const XLR_MAX_BLOCK_ID: u8 = 32;
+// TODO: Make this configurable
+pub const BLCKSZ: u16 = 8192;
+pub type BlockNumber = u32;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ForkNumber {
+    Main,
+    Fsm,
+    VisibilityMap,
+    Init,
+}
+
+impl TryFrom<u8> for ForkNumber {
+    type Error = u8;
+
+    fn try_from(byte: u8) -> Result<Self, Self::Error> {
+        match byte {
+            0x00 => Ok(ForkNumber::Main),
+            0x01 => Ok(ForkNumber::Fsm),
+            0x02 => Ok(ForkNumber::VisibilityMap),
+            0x03 => Ok(ForkNumber::Init),
+            f => Err(f),
+        }
+    }
+}
+
+impl std::fmt::Display for ForkNumber {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let s = match self {
+            ForkNumber::Main => "Main",
+            ForkNumber::Fsm => "Fsm",
+            ForkNumber::VisibilityMap => "VisibilityMap",
+            ForkNumber::Init => "Init",
+        };
+        write!(f, "{}", s)
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
-pub struct RelFileNode {
+pub struct RelFileLocator {
     pub spc_node: u32,
     pub db_node: u32,
     pub rel_node: u32,
+}
+
+impl std::fmt::Display for RelFileLocator {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}/{}/{}", self.spc_node, self.db_node, self.rel_node)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -44,14 +86,24 @@ pub struct XLBImage {
     pub bkp_image: Vec<u8>,
 }
 
+impl std::fmt::Display for XLBImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "apply_image: {}, hole_offset: {}, hole_length: {}, len: {}, info: 0x{:X}",
+            self.apply_image, self.hole_offset, self.hole_length, self.bimg_len, self.bimg_info
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct XLBData {
     pub blk_id: u8,
 
     // Identify the block this refers to
-    pub rnode: Option<RelFileNode>,
-    pub blkno: u32,
-    pub fork_num: u8,
+    pub rnode: Option<RelFileLocator>,
+    pub blkno: BlockNumber,
+    pub fork_num: Option<ForkNumber>,
 
     // Copy of fork_flags field from the block header
     pub flags: u8,
@@ -64,22 +116,6 @@ pub struct XLBData {
     pub data: Option<Vec<u8>>,
 }
 
-impl std::fmt::Display for RelFileNode {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}/{}/{}", self.spc_node, self.db_node, self.rel_node)
-    }
-}
-
-impl std::fmt::Display for XLBImage {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "apply_image: {}, hole_offset: {}, hole_length: {}, len: {}, info: 0x{:X}",
-            self.apply_image, self.hole_offset, self.hole_length, self.bimg_len, self.bimg_info
-        )
-    }
-}
-
 impl std::fmt::Display for XLBData {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let rnode_str = self
@@ -90,12 +126,16 @@ impl std::fmt::Display for XLBData {
             .image
             .as_ref()
             .map_or(String::from(""), |x| format!("image: {}, ", x));
+        let fork_str = self
+            .fork_num
+            .as_ref()
+            .map_or(String::from(""), |x| format!("fork: {}, ", x));
         if self.blk_id < XLR_MAX_BLOCK_ID {
             write!(
                 f,
-                "blk_id: 0x{:X}, fork_num: {}, {}has_data: {}, flags: 0x{:X}, {}data_len: {}",
+                "blk_id: 0x{:X}, {}{}has_data: {}, flags: 0x{:X}, {}data_len: {}",
                 self.blk_id,
-                self.fork_num,
+                fork_str,
                 image_str,
                 self.has_data,
                 self.flags,
@@ -112,7 +152,7 @@ impl std::fmt::Display for XLBData {
     }
 }
 
-pub fn parse_main_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogError<&[u8]>> {
+fn parse_main_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogError<&[u8]>> {
     let (i, blk_id) = le_u8(i)?;
     if blk_id < XLR_BLOCK_ID_DATA_LONG {
         // Not a main block header, exit
@@ -130,7 +170,7 @@ pub fn parse_main_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogErr
         blk_id,
         rnode: None,
         blkno: 0,
-        fork_num: 0,
+        fork_num: None,
         flags: 0,
         image: None,
         has_data: true,
@@ -141,11 +181,11 @@ pub fn parse_main_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogErr
     Ok((i, block_header))
 }
 
-fn parse_relfilenode(i: &[u8]) -> IResult<&[u8], RelFileNode, XLogError<&[u8]>> {
+fn parse_relfilenode(i: &[u8]) -> IResult<&[u8], RelFileLocator, XLogError<&[u8]>> {
     let (i, spc_node) = le_u32(i)?;
     let (i, db_node) = le_u32(i)?;
     let (i, rel_node) = le_u32(i)?;
-    let rnode = RelFileNode {
+    let rnode = RelFileLocator {
         spc_node,
         db_node,
         rel_node,
@@ -191,7 +231,7 @@ fn parse_block_image(i: &[u8]) -> IResult<&[u8], XLBImage, XLogError<&[u8]>> {
     Ok((i, xlb_image))
 }
 
-pub fn parse_data_block_header<'a>(
+fn parse_data_block_header<'a>(
     previous_block: Option<&XLBData>,
     i: &'a [u8],
 ) -> IResult<&'a [u8], XLBData, XLogError<&'a [u8]>> {
@@ -209,7 +249,10 @@ pub fn parse_data_block_header<'a>(
     }
 
     let (i, fork_flags) = le_u8(i)?;
-    let fork_num = fork_flags & BKPBLOCK_FORK_MASK;
+    let fork_num = match ForkNumber::try_from(fork_flags & BKPBLOCK_FORK_MASK) {
+        Ok(fork_num) => Some(fork_num),
+        Err(f) => return Err(nom::Err::Error(XLogError::InvalidForkNumber(f))),
+    };
     let flags = fork_flags & BKPBLOCK_FLAG_MASK;
     let has_image = fork_flags & BKPBLOCK_HAS_IMAGE > 0;
     let has_data = fork_flags & BKPBLOCK_HAS_DATA > 0;

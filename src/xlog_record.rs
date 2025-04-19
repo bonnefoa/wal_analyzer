@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::mem;
 
 use crate::error::XLogError;
@@ -9,6 +8,8 @@ use nom::multi;
 use nom::number::complete::{le_u32, le_u64, le_u8};
 use nom::IResult;
 use nom::Parser;
+
+const XLOG_RECORD_HEADER_SIZE: usize = mem::size_of::<XLogRecordHeader>();
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum RmgrId {
@@ -97,8 +98,6 @@ impl std::fmt::Display for RmgrId {
         write!(f, "{}", s)
     }
 }
-
-pub const XLOG_RECORD_HEADER_SIZE: usize = mem::size_of::<XLogRecordHeader>();
 
 #[derive(Clone, Debug)]
 pub struct XLogRecord {
