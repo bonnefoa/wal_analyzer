@@ -17,18 +17,19 @@ pub const XLR_BLOCK_ID_DATA_LONG: u8 = 0xfe;
 pub const XLR_BLOCK_ID_DATA_SHORT: u8 = 0xff;
 
 /// page image has "hole"
-const BKPIMAGE_HAS_HOLE: u8 = 0x01;
+pub const BKPIMAGE_HAS_HOLE: u8 = 0x01;
 ///page image is compressed
-const BKPIMAGE_IS_COMPRESSED: u8 = 0x02;
+pub const BKPIMAGE_IS_COMPRESSED: u8 = 0x02;
 ///page image should be restored during replay
-const BKPIMAGE_APPLY: u8 = 0x04;
+pub const BKPIMAGE_APPLY: u8 = 0x04;
+
 const XLR_MAX_BLOCK_ID: u8 = 32;
 
 // TODO: Make this configurable
 pub const BLCKSZ: u16 = 8192;
 pub type BlockNumber = u32;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq, Copy)]
 pub enum ForkNumber {
     Main,
     Fsm,
@@ -62,7 +63,7 @@ impl std::fmt::Display for ForkNumber {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct RelFileLocator {
     pub spc_node: u32,
     pub db_node: u32,
@@ -72,6 +73,23 @@ pub struct RelFileLocator {
 impl std::fmt::Display for RelFileLocator {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}/{}/{}", self.spc_node, self.db_node, self.rel_node)
+    }
+}
+
+#[derive(Debug, Clone, Eq, Hash, PartialEq, Copy)]
+pub struct PageId {
+    pub locator: RelFileLocator,
+    pub blockno: BlockNumber,
+    pub fork: ForkNumber,
+}
+
+impl std::fmt::Display for PageId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "locator: {}, blockno{}, fork: {}",
+            self.locator, self.blockno, self.fork
+        )
     }
 }
 
@@ -92,23 +110,6 @@ impl std::fmt::Display for XLBImage {
             f,
             "apply_image: {}, hole_offset: {}, hole_length: {}, len: {}, info: 0x{:X}",
             self.apply_image, self.hole_offset, self.hole_length, self.bimg_len, self.bimg_info
-        )
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PageId {
-    pub locator: RelFileLocator,
-    pub blockno: BlockNumber,
-    pub fork: ForkNumber,
-}
-
-impl std::fmt::Display for PageId {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "locator: {}, blockno{}, fork: {}",
-            self.locator, self.blockno, self.fork
         )
     }
 }
