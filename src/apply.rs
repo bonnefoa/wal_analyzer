@@ -19,6 +19,12 @@ pub struct PageMapping {
     pub pages: HashMap<PageId, Page>,
 }
 
+impl Default for PageMapping {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PageMapping {
     pub fn new() -> Self {
         let pages = HashMap::new();
@@ -63,11 +69,5 @@ impl PageMapping {
         let data: [u8; BLCKSZ as usize] = page_vec.as_slice().try_into().unwrap();
         self.pages.insert(pageId, Page { data });
         Ok(())
-    }
-}
-
-impl Default for PageMapping {
-    fn default() -> Self {
-        Self::new()
     }
 }
