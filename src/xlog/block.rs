@@ -119,7 +119,7 @@ pub struct XLBData {
     pub blk_id: u8,
 
     // Identify the block this refers to
-    pub pageId: Option<PageId>,
+    pub page_id: Option<PageId>,
 
     // Copy of fork_flags field from the block header
     pub flags: u8,
@@ -136,7 +136,7 @@ pub struct XLBData {
 impl std::fmt::Display for XLBData {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let pageid_str = self
-            .pageId
+            .page_id
             .as_ref()
             .map_or(String::from(""), |x| format!("page: {}, ", x));
         let image_str = self
@@ -175,7 +175,7 @@ fn parse_main_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogError<&
     let data = Some(vec![0; data_len as usize]);
     let block_header = XLBData {
         blk_id,
-        pageId: None,
+        page_id: None,
         flags: 0,
         image: None,
         has_data: true,
@@ -282,8 +282,8 @@ fn parse_data_block_header<'a>(
             // No previous block
             None => return Err(nom::Err::Error(XLogError::OutOfOrderBlock)),
             // Return previous relnode
-            Some(blk) => match &blk.pageId {
-                Some(pageId) => (i, pageId.locator),
+            Some(blk) => match &blk.page_id {
+                Some(page_id) => (i, page_id.locator),
                 None => return Err(nom::Err::Error(XLogError::OutOfOrderBlock)),
             },
         }
@@ -292,7 +292,7 @@ fn parse_data_block_header<'a>(
     };
 
     let (i, blockno) = le_u32(i)?;
-    let pageId = Some(PageId {
+    let page_id = Some(PageId {
         locator,
         blockno,
         fork,
@@ -300,7 +300,7 @@ fn parse_data_block_header<'a>(
     let data = Some(vec![0; data_len as usize]);
     let block = XLBData {
         blk_id,
-        pageId,
+        page_id,
         flags,
         image,
         has_data,
@@ -342,7 +342,7 @@ pub fn parse_blocks(i: &[u8]) -> IResult<&[u8], Vec<XLBData>, XLogError<&[u8]>> 
 
         let (i, data) = take(block.data_len)(input)?;
         input = i;
-        debug!("Data for block {:?}: {:X?}", block.pageId, data);
+        debug!("Data for block {:?}: {:X?}", block.page_id, data);
         if let Some(block_data) = block.data.as_mut() {
             block_data.copy_from_slice(data);
         } else {

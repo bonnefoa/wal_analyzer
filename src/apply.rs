@@ -38,8 +38,8 @@ impl PageMapping {
     }
 
     fn apply_image(&mut self, block: &XLBData, image: &XLBImage) -> Result<(), ApplyError> {
-        let pageId = match block.pageId {
-            Some(pageId) => pageId,
+        let page_id = match block.page_id {
+            Some(page_id) => page_id,
             None => return Ok(()),
         };
 
@@ -64,7 +64,7 @@ impl PageMapping {
 
         // TODO: Better check on vec size
         let data: [u8; BLCKSZ as usize] = page_vec.as_slice().try_into().unwrap();
-        self.pages.insert(pageId, Page { data });
+        self.pages.insert(page_id, Page { data });
         Ok(())
     }
 }
