@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::xlog::block::{PageId, XLBData, XLBImage, BKPIMAGE_IS_COMPRESSED, BLCKSZ};
-use crate::xlog::record::XLogRecord;
+use crate::xlog::record::{RmgrId, XLogRecord};
 
 #[derive(Debug)]
 pub struct ApplyError {
@@ -29,10 +29,21 @@ impl PageMapping {
     }
 
     pub fn apply_xlog_record(&mut self, record: &XLogRecord) -> Result<(), ApplyError> {
+        if record.header.xl_rmid != RmgrId::Heap || record.header.xl_rmid != RmgrId::Heap2 {
+            // Not a heap change, ignore
+            // TODO: Handle btree
+            return Ok(());
+        }
+
         for block in &record.blocks {
+            // First, restore eventual full page images
             if let Some(image) = &block.image {
                 self.apply_image(block, image)?
             }
+
+            // if let Some(data) = block.data {
+            //     self.apply_data(block, data)?
+            // }
         }
         Ok(())
     }
@@ -66,5 +77,9 @@ impl PageMapping {
         let data: [u8; BLCKSZ as usize] = page_vec.as_slice().try_into().unwrap();
         self.pages.insert(page_id, Page { data });
         Ok(())
+    }
+
+    fn apply_data(&self, block: &XLBData, data: Vec<u8>) -> Result<(), ApplyError> {
+        todo!()
     }
 }

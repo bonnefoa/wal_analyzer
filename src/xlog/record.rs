@@ -9,6 +9,8 @@ use nom::number::complete::{le_u32, le_u64, le_u8};
 use nom::IResult;
 use nom::Parser;
 
+use super::operation::heap::HeapOperation;
+
 const XLOG_RECORD_HEADER_SIZE: usize = mem::size_of::<XLogRecordHeader>();
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -100,9 +102,15 @@ impl std::fmt::Display for RmgrId {
 }
 
 #[derive(Clone, Debug)]
+pub enum Operation {
+    HeapOperation(HeapOperation),
+}
+
+#[derive(Clone, Debug)]
 pub struct XLogRecord {
     pub header: XLogRecordHeader,
     pub blocks: Vec<XLBData>,
+    pub operation: Operation,
 }
 
 #[derive(Clone, Debug)]
