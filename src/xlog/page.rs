@@ -1,7 +1,7 @@
 use std::mem;
 
 use crate::error::XLogError;
-use crate::xlog_record::{consume_padding, parse_xlog_records, XLogRecord};
+use crate::xlog::record::{consume_padding, parse_xlog_records, XLogRecord};
 use log::debug;
 use nom::combinator::map;
 use nom::multi::many1;

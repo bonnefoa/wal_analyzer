@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use nom::Finish;
 
 use crate::error::XLogError;
-use crate::xlog_page::{parse_xlog_page, XLogPageContent};
-use crate::xlog_record::XLogRecord;
+use crate::xlog::page::{parse_xlog_page, XLogPageContent};
+use crate::xlog::record::XLogRecord;
 
 pub type XLogRecPtr = u64;
 pub type TimelineID = u32;

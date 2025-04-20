@@ -1,7 +1,7 @@
 use std::mem;
 
 use crate::error::XLogError;
-use crate::xlog_block::{parse_blocks, XLBData};
+use crate::xlog::block::{parse_blocks, XLBData};
 use log::debug;
 use nom::bytes::complete::take;
 use nom::multi;

@@ -1,4 +1,4 @@
-use wal_analyzer::{apply::PageMapping, xlog_record::parse_xlog_record};
+use wal_analyzer::{apply::PageMapping, xlog::record::parse_xlog_record};
 
 #[cfg(test)]
 #[ctor::ctor]

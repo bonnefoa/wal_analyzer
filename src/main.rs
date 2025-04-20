@@ -1,6 +1,6 @@
 use clap::Parser;
 use std::path::PathBuf;
-use wal_analyzer::xlog_reader::XLogReader;
+use wal_analyzer::xlog::reader::XLogReader;
 
 /// A PostgreSQL XLOG analyzer CLI tool
 #[derive(Parser, Debug)]

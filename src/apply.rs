@@ -1,10 +1,7 @@
 use std::collections::HashMap;
-use std::iter;
 
-use crate::xlog_block::{
-    PageId, XLBData, XLBImage, BKPIMAGE_HAS_HOLE, BKPIMAGE_IS_COMPRESSED, BLCKSZ,
-};
-use crate::xlog_record::XLogRecord;
+use crate::xlog::block::{PageId, XLBData, XLBImage, BKPIMAGE_IS_COMPRESSED, BLCKSZ};
+use crate::xlog::record::XLogRecord;
 
 #[derive(Debug)]
 pub struct ApplyError {
