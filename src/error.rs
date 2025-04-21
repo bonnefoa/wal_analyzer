@@ -14,6 +14,7 @@ pub enum XLogError<I: Sized> {
     InvalidBlockId(Option<u8>, u8),
     OutOfOrderBlock,
     InvalidForkNumber(u8),
+    InvalidResourceManager(u8),
     UnexpectedBlockDataLen(u16),
     IncorrectId(u8),
     IncorrectPageType,
@@ -46,6 +47,7 @@ where
             XLogError::InvalidPageHeader => write!(f, "Invalid page header"),
             XLogError::EmptyRecord => write!(f, "Empty record"),
             XLogError::InvalidForkNumber(u) => write!(f, "Invalid fork value: {}", u),
+            XLogError::InvalidResourceManager(u) => write!(f, "Invalid resource manager: {}", u),
             XLogError::EndBlock => write!(f, "End block"),
             XLogError::InvalidBlockImageHole(hole_offset, hole_length, bimg_len) => {
                 write!(

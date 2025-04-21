@@ -37,35 +37,36 @@ pub enum RmgrId {
     ReplicationOrigin,
     Generic,
     LogicalMsg,
-    Unused(u8),
 }
 
-impl From<u8> for RmgrId {
-    fn from(byte: u8) -> RmgrId {
+impl TryFrom<u8> for RmgrId {
+    type Error = u8;
+
+    fn try_from(byte: u8) -> Result<Self, Self::Error> {
         match byte {
-            0x00 => RmgrId::Xlog,
-            0x01 => RmgrId::Transaction,
-            0x02 => RmgrId::Storage,
-            0x03 => RmgrId::Clog,
-            0x04 => RmgrId::Database,
-            0x05 => RmgrId::Tablespace,
-            0x06 => RmgrId::MultiXact,
-            0x07 => RmgrId::RelMap,
-            0x08 => RmgrId::Standby,
-            0x09 => RmgrId::Heap2,
-            0x0a => RmgrId::Heap,
-            0x0b => RmgrId::Btree,
-            0x0c => RmgrId::Hash,
-            0x0d => RmgrId::Gin,
-            0x0e => RmgrId::Gist,
-            0x0f => RmgrId::Sequence,
-            0x10 => RmgrId::Spgist,
-            0x11 => RmgrId::Brin,
-            0x12 => RmgrId::CommitTs,
-            0x13 => RmgrId::ReplicationOrigin,
-            0x14 => RmgrId::Generic,
-            0x15 => RmgrId::LogicalMsg,
-            unused => RmgrId::Unused(unused),
+            0x00 => Ok(RmgrId::Xlog),
+            0x01 => Ok(RmgrId::Transaction),
+            0x02 => Ok(RmgrId::Storage),
+            0x03 => Ok(RmgrId::Clog),
+            0x04 => Ok(RmgrId::Database),
+            0x05 => Ok(RmgrId::Tablespace),
+            0x06 => Ok(RmgrId::MultiXact),
+            0x07 => Ok(RmgrId::RelMap),
+            0x08 => Ok(RmgrId::Standby),
+            0x09 => Ok(RmgrId::Heap2),
+            0x0a => Ok(RmgrId::Heap),
+            0x0b => Ok(RmgrId::Btree),
+            0x0c => Ok(RmgrId::Hash),
+            0x0d => Ok(RmgrId::Gin),
+            0x0e => Ok(RmgrId::Gist),
+            0x0f => Ok(RmgrId::Sequence),
+            0x10 => Ok(RmgrId::Spgist),
+            0x11 => Ok(RmgrId::Brin),
+            0x12 => Ok(RmgrId::CommitTs),
+            0x13 => Ok(RmgrId::ReplicationOrigin),
+            0x14 => Ok(RmgrId::Generic),
+            0x15 => Ok(RmgrId::LogicalMsg),
+            f => Err(f),
         }
     }
 }
@@ -95,7 +96,6 @@ impl std::fmt::Display for RmgrId {
             RmgrId::ReplicationOrigin => "ReplicationOrigin",
             RmgrId::Generic => "Generic",
             RmgrId::LogicalMsg => "LogicalMsg",
-            RmgrId::Unused(_) => "Unused",
         };
         write!(f, "{}", s)
     }
@@ -103,7 +103,28 @@ impl std::fmt::Display for RmgrId {
 
 #[derive(Clone, Debug)]
 pub enum Operation {
-    HeapOperation(HeapOperation),
+    Xlog,
+    Transaction,
+    Storage,
+    Clog,
+    Database,
+    Tablespace,
+    MultiXact,
+    RelMap,
+    Standby,
+    Heap2,
+    Heap(HeapOperation),
+    Btree,
+    Hash,
+    Gin,
+    Gist,
+    Sequence,
+    Spgist,
+    Brin,
+    CommitTs,
+    ReplicationOrigin,
+    Generic,
+    LogicalMsg,
 }
 
 #[derive(Clone, Debug)]
@@ -115,17 +136,21 @@ pub struct XLogRecord {
 
 #[derive(Clone, Debug)]
 pub struct XLogRecordHeader {
-    // Total length of the record
+    /// Total length of the record
     pub xl_tot_len: u32,
-    // Transaction ID
+    /// Transaction ID
     pub xl_xid: u32,
-    // Pointer to previous record (LSN)
+    /// Pointer to previous record (LSN)
     pub xl_prev: u64,
-    // Flag bits
-    pub xl_info: u8,
-    // Resource manager for this record
+
+    // Info Mask
+    pub special_rel_update: bool,
+    pub check_consistency: bool,
+    pub rmgr_info: u8,
+
+    /// Resource manager for this record
     pub xl_rmid: RmgrId,
-    // CRC for this record
+    /// CRC for this record
     pub xl_crc: u32,
 }
 
@@ -182,7 +207,18 @@ pub fn parse_xlog_record_header(i: &[u8]) -> IResult<&[u8], XLogRecordHeader, XL
     let (i, xl_xid) = le_u32(i)?;
     let (i, xl_prev) = le_u64(i)?;
     let (i, xl_info) = le_u8(i)?;
-    let (i, xl_rmid) = le_u8(i).map(|(i, x)| (i, RmgrId::from(x)))?;
+    // First 4 bits of xl_info is used by rmgr
+    let rmgr_info = xl_info & 0xf0;
+    // Last 4 bits of xl_info
+    let special_rel_update = xl_info & 0x01 != 0;
+    let check_consistency = xl_info & 0x02 != 0;
+
+    let (i, rmid) = le_u8(i)?;
+    let xl_rmid = match RmgrId::try_from(rmid) {
+        Ok(xl_rmid) => xl_rmid,
+        Err(f) => return Err(nom::Err::Error(XLogError::InvalidResourceManager(f))),
+    };
+
     let (i, _) = consume_padding(i, 2)?;
     let (i, xl_crc) = le_u32(i)?;
     let data_len = xl_tot_len as usize - XLOG_RECORD_HEADER_SIZE;
@@ -194,7 +230,9 @@ pub fn parse_xlog_record_header(i: &[u8]) -> IResult<&[u8], XLogRecordHeader, XL
         xl_tot_len,
         xl_xid,
         xl_prev,
-        xl_info,
+        special_rel_update,
+        check_consistency,
+        rmgr_info,
         xl_rmid,
         xl_crc,
     };
@@ -217,10 +255,42 @@ pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]
         )));
     }
 
+    let operation = match header.xl_rmid {
+        RmgrId::Xlog => Operation::Xlog,
+        RmgrId::Transaction => Operation::Transaction,
+        RmgrId::Storage => Operation::Storage,
+        RmgrId::Clog => Operation::Clog,
+        RmgrId::Database => Operation::Database,
+        RmgrId::Tablespace => Operation::Tablespace,
+        RmgrId::MultiXact => Operation::MultiXact,
+        RmgrId::RelMap => Operation::RelMap,
+        RmgrId::Standby => Operation::Standby,
+        RmgrId::Heap => Operation::Heap2,
+        RmgrId::Heap2 => Operation::Heap2,
+        RmgrId::Btree => Operation::Btree,
+        RmgrId::Hash => Operation::Hash,
+        RmgrId::Gin => Operation::Gin,
+        RmgrId::Gist => Operation::Gist,
+        RmgrId::Sequence => Operation::Sequence,
+        RmgrId::Spgist => Operation::Spgist,
+        RmgrId::Brin => Operation::Brin,
+        RmgrId::CommitTs => Operation::CommitTs,
+        RmgrId::ReplicationOrigin => Operation::ReplicationOrigin,
+        RmgrId::Generic => Operation::Generic,
+        RmgrId::LogicalMsg => Operation::LogicalMsg,
+    };
+
     // Padding needs to be consumed
     let i = &i[record_length..];
     let (i, _) = consume_padding(i, i.len() % 8)?;
-    Ok((i, XLogRecord { header, blocks }))
+    Ok((
+        i,
+        XLogRecord {
+            header,
+            blocks,
+            operation,
+        },
+    ))
 }
 
 pub fn parse_xlog_records(i: &[u8]) -> IResult<&[u8], Vec<XLogRecord>, XLogError<&[u8]>> {

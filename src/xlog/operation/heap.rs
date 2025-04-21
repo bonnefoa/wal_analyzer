@@ -23,7 +23,7 @@ pub struct Delete {
     pub offnum: OffsetNumber,
     pub infobits: Infobits,
 
-    /// Delete flag
+    /// Delete flags
     pub all_visible_cleared: bool,
     pub contains_old_tuple: bool,
     pub contains_old_key: bool,
@@ -34,7 +34,14 @@ pub struct Delete {
 #[derive(Clone, Debug)]
 pub struct Insert {
     pub offnum: OffsetNumber,
-    pub flags: u8,
+
+    /// Insert flags
+    pub all_visible_cleared: bool,
+    pub last_in_multi: bool,
+    pub is_speculative: bool,
+    pub contains_new_tuple: bool,
+    pub on_toast_relation: bool,
+    pub all_frozen_set: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -43,7 +50,7 @@ pub struct Update {
     pub old_offnum: OffsetNumber,
     pub old_infobits: Infobits,
 
-    /// Update Flags
+    /// Update flags
     pub old_all_visible_cleared: bool,
     pub new_all_visible_cleared: bool,
     pub contains_old_tuple: bool,
@@ -125,3 +132,37 @@ pub fn parse_heap_update(i: &[u8]) -> IResult<&[u8], Update, XLogError<&[u8]>> {
 
     Ok((i, heap_update))
 }
+
+pub fn parse_heap_insert(i: &[u8]) -> IResult<&[u8], Insert, XLogError<&[u8]>> {
+    let (i, offnum) = le_u16(i)?;
+    let (i, flags) = le_u8(i)?;
+
+    let heap_insert = Insert {
+        offnum,
+        all_visible_cleared: flags & 0x01 != 0,
+        last_in_multi: flags & 0x02 != 0,
+        is_speculative: flags & 0x04 != 0,
+        contains_new_tuple: flags & 0x08 != 0,
+        on_toast_relation: flags & 0x10 != 0,
+        all_frozen_set: flags & 0x20 != 0,
+    };
+
+    Ok((i, heap_insert))
+}
+
+pub fn parse_heap_prune(i: &[u8]) -> IResult<&[u8], Prune, XLogError<&[u8]>> {
+    let (i, latest_remove_xid) = le_u32(i)?;
+    let (i, nredirected) = le_u16(i)?;
+    let (i, ndead) = le_u16(i)?;
+
+    let heap_prune = Prune {
+        latest_remove_xid,
+        nredirected,
+        ndead,
+    };
+
+    Ok((i, heap_prune))
+}
+
+// pub fn parse_heap_operation(i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u8]>> {
+// }
