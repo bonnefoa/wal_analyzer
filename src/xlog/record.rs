@@ -9,7 +9,7 @@ use nom::number::complete::{le_u32, le_u64, le_u8};
 use nom::IResult;
 use nom::Parser;
 
-use super::operation::heap::HeapOperation;
+use super::operation::heap::{parse_heap_operation, HeapOperation};
 
 const XLOG_RECORD_HEADER_SIZE: usize = mem::size_of::<XLogRecordHeader>();
 
@@ -247,37 +247,31 @@ pub fn parse_xlog_record(i: &[u8]) -> IResult<&[u8], XLogRecord, XLogError<&[u8]
     // Create a subslice with block headers and data
     let record_length = header.xl_tot_len as usize - XLOG_RECORD_HEADER_SIZE;
     let block_bytes = &i[..record_length];
+    let (_, (main_block_start, blocks)) = parse_blocks(block_bytes)?;
 
-    let (block_bytes, blocks) = parse_blocks(block_bytes)?;
-    if !block_bytes.is_empty() {
-        return Err(nom::Err::Error(XLogError::LeftoverBytes(
-            block_bytes.to_owned(),
-        )));
-    }
-
-    let operation = match header.xl_rmid {
-        RmgrId::Xlog => Operation::Xlog,
-        RmgrId::Transaction => Operation::Transaction,
-        RmgrId::Storage => Operation::Storage,
-        RmgrId::Clog => Operation::Clog,
-        RmgrId::Database => Operation::Database,
-        RmgrId::Tablespace => Operation::Tablespace,
-        RmgrId::MultiXact => Operation::MultiXact,
-        RmgrId::RelMap => Operation::RelMap,
-        RmgrId::Standby => Operation::Standby,
-        RmgrId::Heap => Operation::Heap2,
-        RmgrId::Heap2 => Operation::Heap2,
-        RmgrId::Btree => Operation::Btree,
-        RmgrId::Hash => Operation::Hash,
-        RmgrId::Gin => Operation::Gin,
-        RmgrId::Gist => Operation::Gist,
-        RmgrId::Sequence => Operation::Sequence,
-        RmgrId::Spgist => Operation::Spgist,
-        RmgrId::Brin => Operation::Brin,
-        RmgrId::CommitTs => Operation::CommitTs,
-        RmgrId::ReplicationOrigin => Operation::ReplicationOrigin,
-        RmgrId::Generic => Operation::Generic,
-        RmgrId::LogicalMsg => Operation::LogicalMsg,
+    let (_, operation) = match header.xl_rmid {
+        RmgrId::Xlog => (main_block_start, Operation::Xlog),
+        RmgrId::Transaction => (main_block_start, Operation::Transaction),
+        RmgrId::Storage => (main_block_start, Operation::Storage),
+        RmgrId::Clog => (main_block_start, Operation::Clog),
+        RmgrId::Database => (main_block_start, Operation::Database),
+        RmgrId::Tablespace => (main_block_start, Operation::Tablespace),
+        RmgrId::MultiXact => (main_block_start, Operation::MultiXact),
+        RmgrId::RelMap => (main_block_start, Operation::RelMap),
+        RmgrId::Standby => (main_block_start, Operation::Standby),
+        RmgrId::Heap => parse_heap_operation(main_block_start)?,
+        RmgrId::Heap2 => (main_block_start, Operation::Heap2),
+        RmgrId::Btree => (main_block_start, Operation::Btree),
+        RmgrId::Hash => (main_block_start, Operation::Hash),
+        RmgrId::Gin => (main_block_start, Operation::Gin),
+        RmgrId::Gist => (main_block_start, Operation::Gist),
+        RmgrId::Sequence => (main_block_start, Operation::Sequence),
+        RmgrId::Spgist => (main_block_start, Operation::Spgist),
+        RmgrId::Brin => (main_block_start, Operation::Brin),
+        RmgrId::CommitTs => (main_block_start, Operation::CommitTs),
+        RmgrId::ReplicationOrigin => (main_block_start, Operation::ReplicationOrigin),
+        RmgrId::Generic => (main_block_start, Operation::Generic),
+        RmgrId::LogicalMsg => (main_block_start, Operation::LogicalMsg),
     };
 
     // Padding needs to be consumed

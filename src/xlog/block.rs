@@ -311,7 +311,9 @@ fn parse_data_block_header<'a>(
     Ok((i, block))
 }
 
-pub fn parse_blocks(i: &[u8]) -> IResult<&[u8], Vec<XLBData>, XLogError<&[u8]>> {
+type BlockResult<'a> = (&'a [u8], Vec<XLBData>);
+
+pub fn parse_blocks(i: &[u8]) -> IResult<&[u8], BlockResult, XLogError<&[u8]>> {
     let mut blocks = Vec::new();
     let mut input = i;
     loop {
@@ -324,7 +326,9 @@ pub fn parse_blocks(i: &[u8]) -> IResult<&[u8], Vec<XLBData>, XLogError<&[u8]>> 
             Err(e) => return Err(e),
         }
     }
-    let (i, main_block) = parse_main_data_block_header(input)?;
+
+    let main_block_start = input;
+    let (i, main_block) = parse_main_data_block_header(main_block_start)?;
     input = i;
     blocks.push(main_block);
 
@@ -350,5 +354,8 @@ pub fn parse_blocks(i: &[u8]) -> IResult<&[u8], Vec<XLBData>, XLogError<&[u8]>> 
         }
     }
 
-    Ok((input, blocks))
+    if !input.is_empty() {
+        return Err(nom::Err::Error(XLogError::LeftoverBytes(input.to_owned())));
+    }
+    Ok((input, (main_block_start, blocks)))
 }

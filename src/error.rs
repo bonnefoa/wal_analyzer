@@ -6,6 +6,7 @@ use nom::error::{ErrorKind, ParseError};
 pub enum XLogError<I: Sized> {
     /// No more data available
     Eof,
+    Placeholder,
     InvalidPageHeader,
     EmptyRecord,
     EndBlock,
@@ -37,6 +38,12 @@ impl<I> ParseError<I> for XLogError<I> {
     }
 }
 
+impl<I> From<XLogError<I>> for nom::Err<XLogError<I>> {
+    fn from(item: XLogError<I>) -> Self {
+        nom::Err::Error(item)
+    }
+}
+
 impl<I> fmt::Display for XLogError<I>
 where
     I: fmt::Debug,
@@ -45,6 +52,7 @@ where
         match self {
             XLogError::Eof => write!(f, "End of file"),
             XLogError::InvalidPageHeader => write!(f, "Invalid page header"),
+            XLogError::Placeholder => write!(f, "Placeholder error"),
             XLogError::EmptyRecord => write!(f, "Empty record"),
             XLogError::InvalidForkNumber(u) => write!(f, "Invalid fork value: {}", u),
             XLogError::InvalidResourceManager(u) => write!(f, "Invalid resource manager: {}", u),

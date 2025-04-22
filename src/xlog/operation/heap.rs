@@ -5,7 +5,10 @@ use nom::{
 
 use crate::{
     error::XLogError,
-    xlog::common::{OffsetNumber, TransactionId},
+    xlog::{
+        common::{OffsetNumber, TransactionId},
+        record::Operation,
+    },
 };
 
 #[derive(Clone, Debug)]
@@ -164,5 +167,6 @@ pub fn parse_heap_prune(i: &[u8]) -> IResult<&[u8], Prune, XLogError<&[u8]>> {
     Ok((i, heap_prune))
 }
 
-// pub fn parse_heap_operation(i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u8]>> {
-// }
+pub fn parse_heap_operation(i: &[u8]) -> IResult<&[u8], Operation, XLogError<&[u8]>> {
+    todo!()
+}
