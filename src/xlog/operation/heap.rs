@@ -1,3 +1,4 @@
+use log::debug;
 use nom::{
     number::complete::{le_u16, le_u32, le_u8},
     IResult,
@@ -78,6 +79,19 @@ pub enum HeapOperation {
     Insert(Insert),
     Update(Update),
     Prune(Prune),
+    Placeholder,
+}
+
+impl std::fmt::Display for HeapOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            HeapOperation::Delete(o) => write!(f, "{:?}", o),
+            HeapOperation::Insert(o) => write!(f, "{:?}", o),
+            HeapOperation::Update(o) => write!(f, "{:?}", o),
+            HeapOperation::Prune(o) => write!(f, "{:?}", o),
+            HeapOperation::Placeholder => write!(f, "Placeholder"),
+        }
+    }
 }
 
 pub fn parse_infobits(i: &[u8]) -> IResult<&[u8], Infobits, XLogError<&[u8]>> {
@@ -93,7 +107,7 @@ pub fn parse_infobits(i: &[u8]) -> IResult<&[u8], Infobits, XLogError<&[u8]>> {
     Ok((i, infobits))
 }
 
-pub fn parse_heap_delete(i: &[u8]) -> IResult<&[u8], Delete, XLogError<&[u8]>> {
+pub fn parse_heap_delete(i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u8]>> {
     let (i, xmax) = le_u32(i)?;
     let (i, offnum) = le_u16(i)?;
     let (i, infobits) = parse_infobits(i)?;
@@ -108,10 +122,10 @@ pub fn parse_heap_delete(i: &[u8]) -> IResult<&[u8], Delete, XLogError<&[u8]>> {
         is_super: flags & 0x08 != 0,
         is_partition_move: flags & 0x10 != 0,
     };
-    Ok((i, heap_delete))
+    Ok((i, HeapOperation::Delete(heap_delete)))
 }
 
-pub fn parse_heap_update(i: &[u8]) -> IResult<&[u8], Update, XLogError<&[u8]>> {
+pub fn parse_heap_update(i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u8]>> {
     let (i, old_xmax) = le_u32(i)?;
     let (i, old_offnum) = le_u16(i)?;
     let (i, old_infobits) = parse_infobits(i)?;
@@ -133,10 +147,10 @@ pub fn parse_heap_update(i: &[u8]) -> IResult<&[u8], Update, XLogError<&[u8]>> {
         new_offnum,
     };
 
-    Ok((i, heap_update))
+    Ok((i, HeapOperation::Update(heap_update)))
 }
 
-pub fn parse_heap_insert(i: &[u8]) -> IResult<&[u8], Insert, XLogError<&[u8]>> {
+pub fn parse_heap_insert(i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u8]>> {
     let (i, offnum) = le_u16(i)?;
     let (i, flags) = le_u8(i)?;
 
@@ -150,10 +164,10 @@ pub fn parse_heap_insert(i: &[u8]) -> IResult<&[u8], Insert, XLogError<&[u8]>> {
         all_frozen_set: flags & 0x20 != 0,
     };
 
-    Ok((i, heap_insert))
+    Ok((i, HeapOperation::Insert(heap_insert)))
 }
 
-pub fn parse_heap_prune(i: &[u8]) -> IResult<&[u8], Prune, XLogError<&[u8]>> {
+pub fn parse_heap_prune(i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u8]>> {
     let (i, latest_remove_xid) = le_u32(i)?;
     let (i, nredirected) = le_u16(i)?;
     let (i, ndead) = le_u16(i)?;
@@ -164,9 +178,38 @@ pub fn parse_heap_prune(i: &[u8]) -> IResult<&[u8], Prune, XLogError<&[u8]>> {
         ndead,
     };
 
-    Ok((i, heap_prune))
+    Ok((i, HeapOperation::Prune(heap_prune)))
 }
 
-pub fn parse_heap_operation(i: &[u8]) -> IResult<&[u8], Operation, XLogError<&[u8]>> {
-    todo!()
+pub fn parse_heap_truncate(i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u8]>> {
+    todo!("truncate");
+}
+
+pub fn parse_heap_hot_update(i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u8]>> {
+    todo!("hot update");
+}
+
+pub fn parse_heap_confirm(i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u8]>> {
+    todo!("hot update");
+}
+
+pub fn parse_heap_operation(
+    rmgr_info: u8,
+    i: &[u8],
+) -> IResult<&[u8], Operation, XLogError<&[u8]>> {
+    const XLOG_HEAP_OPMASK: u8 = 0x70;
+    let op = rmgr_info & XLOG_HEAP_OPMASK;
+    let (i, heap_operation) = match op {
+        0x00 => parse_heap_insert(i)?,
+        0x10 => parse_heap_delete(i)?,
+        0x20 => parse_heap_update(i)?,
+        0x30 => parse_heap_truncate(i)?,
+        0x40 => parse_heap_hot_update(i)?,
+        0x50 => (i, HeapOperation::Placeholder),
+        0x60 => (i, HeapOperation::Placeholder),
+        0x70 => (i, HeapOperation::Placeholder),
+        _ => panic!("Unreachable"),
+    };
+    debug!("Parsed Operation: {}", heap_operation);
+    Ok((i, Operation::Heap(heap_operation)))
 }
