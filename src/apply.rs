@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::xlog::block::{PageId, XLBData, XLBImage, BKPIMAGE_IS_COMPRESSED, BLCKSZ};
-use crate::xlog::record::{RmgrId, XLogRecord};
+use crate::xlog::operation::heap::{HeapOperation, Insert};
+use crate::xlog::record::{Operation, RmgrId, XLogRecord};
 
 #[derive(Debug)]
 pub struct ApplyError {
@@ -41,9 +42,7 @@ impl PageMapping {
                 self.apply_image(block, image)?
             }
 
-            // if let Some(data) = block.data {
-            //     self.apply_data(block, data)?
-            // }
+            self.apply_operation(record)?
         }
         Ok(())
     }
@@ -79,7 +78,22 @@ impl PageMapping {
         Ok(())
     }
 
-    fn apply_data(&self, block: &XLBData, data: Vec<u8>) -> Result<(), ApplyError> {
+    fn apply_heap_insert(&self, record: &XLogRecord, insert: &Insert) -> Result<(), ApplyError> {
         todo!()
+    }
+
+    fn apply_operation(&self, record: &XLogRecord) -> Result<(), ApplyError> {
+        match &record.operation {
+            Operation::Heap(heap_operation) => match heap_operation {
+                HeapOperation::Delete(delete) => todo!(),
+                HeapOperation::Insert(insert) => self.apply_heap_insert(record, insert),
+                HeapOperation::Update(update) => todo!(),
+                HeapOperation::Prune(prune) => todo!(),
+                HeapOperation::Placeholder => Ok(()),
+            },
+            Operation::Heap2 => todo!(),
+            Operation::Btree => todo!(),
+            _ => Ok(()),
+        }
     }
 }
