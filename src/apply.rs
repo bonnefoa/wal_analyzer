@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use log::debug;
+
 use crate::xlog::block::{PageId, XLBData, XLBImage, BKPIMAGE_IS_COMPRESSED, BLCKSZ};
 use crate::xlog::operation::heap::{HeapOperation, Insert};
 use crate::xlog::record::{Operation, RmgrId, XLogRecord};
@@ -30,9 +32,10 @@ impl PageMapping {
     }
 
     pub fn apply_xlog_record(&mut self, record: &XLogRecord) -> Result<(), ApplyError> {
-        if record.header.xl_rmid != RmgrId::Heap || record.header.xl_rmid != RmgrId::Heap2 {
-            // Not a heap change, ignore
+        if record.header.xl_rmid != RmgrId::Heap && record.header.xl_rmid != RmgrId::Heap2 {
+            // Not a heap change, ignore for now
             // TODO: Handle btree
+            debug!("Got {} record, ignore", record.header);
             return Ok(());
         }
 
@@ -53,6 +56,7 @@ impl PageMapping {
             None => return Ok(()),
         };
 
+        debug!("Restoring full page image");
         if (image.bimg_info & BKPIMAGE_IS_COMPRESSED) != 0 {
             todo!("COMPRESSION NOT IMPLEMENTED");
         }
@@ -78,17 +82,18 @@ impl PageMapping {
         Ok(())
     }
 
-    fn apply_heap_insert(&self, record: &XLogRecord, insert: &Insert) -> Result<(), ApplyError> {
+    fn apply_heap_insert(&self, _record: &XLogRecord, _insert: &Insert) -> Result<(), ApplyError> {
+        debug!("Applying heap insert");
         todo!()
     }
 
     fn apply_operation(&self, record: &XLogRecord) -> Result<(), ApplyError> {
         match &record.operation {
             Operation::Heap(heap_operation) => match heap_operation {
-                HeapOperation::Delete(delete) => todo!(),
+                HeapOperation::Delete(_delete) => todo!(),
                 HeapOperation::Insert(insert) => self.apply_heap_insert(record, insert),
-                HeapOperation::Update(update) => todo!(),
-                HeapOperation::Prune(prune) => todo!(),
+                HeapOperation::Update(_update) => todo!(),
+                HeapOperation::Prune(_prune) => todo!(),
                 HeapOperation::Placeholder => Ok(()),
             },
             Operation::Heap2 => todo!(),

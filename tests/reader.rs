@@ -1,4 +1,4 @@
-use wal_analyzer::xlog_reader::{parse_filename, XLogFilePos};
+use wal_analyzer::xlog::reader::{parse_filename, XLogFilePos};
 
 #[cfg(test)]
 #[ctor::ctor]

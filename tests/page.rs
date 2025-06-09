@@ -1,6 +1,6 @@
 use wal_analyzer::{
-    xlog_page::{parse_xlog_page_header, XLogPageHeader, XLP_BKP_REMOVABLE, XLP_LONG_HEADER},
-    xlog_record::{parse_xlog_record, RmgrId},
+    xlog::page::{parse_xlog_page_header, XLogPageHeader, XLP_BKP_REMOVABLE, XLP_LONG_HEADER},
+    xlog::record::{parse_xlog_record, RmgrId},
 };
 
 #[test]

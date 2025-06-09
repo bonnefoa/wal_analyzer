@@ -2,7 +2,7 @@
 name = "wal_analyzer"
 version = "0.1.0"
 edition = "2021"
-authors = ["Anthonin Bonnefoy <anthonin.bonnefoy@datadoghq.com>"]
+authors = ["Anthonin Bonnefoy <anthonin.bonnefoy@proton.me>"]
 description = "A PostgreSQL WAL analyzer CLI tool"
 license = "MIT"
 
@@ -11,7 +11,9 @@ include = [
   ".gitignore",
   "Cargo.toml",
   "src/*.rs",
-  "tests/*.rs"
+  "src/xlog/*.rs",
+  "tests/*.rs",
+  "tests/xlog/*.rs"
 ]
 
 [dependencies]

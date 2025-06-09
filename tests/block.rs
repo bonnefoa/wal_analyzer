@@ -1,4 +1,4 @@
-use wal_analyzer::xlog_block::{parse_blocks, ForkNumber, PageId, RelFileLocator};
+use wal_analyzer::xlog::block::{parse_blocks, ForkNumber, PageId, RelFileLocator};
 
 #[cfg(test)]
 #[ctor::ctor]
@@ -33,7 +33,7 @@ fn test_parse_heap_block() {
     let res = parse_blocks(input);
     assert!(res.is_ok(), "{:?}", res);
 
-    let (i, blocks) = res.unwrap();
+    let (i, (j, blocks)) = res.unwrap();
     assert_eq!(blocks.len(), 2);
     let block = &blocks[0];
 
@@ -44,7 +44,7 @@ fn test_parse_heap_block() {
         rel_node: 16406,
     };
     assert_eq!(
-        block.pageId,
+        block.page_id,
         Some(PageId {
             locator: expected_locator,
             blockno: 0,
@@ -59,4 +59,5 @@ fn test_parse_heap_block() {
     assert_eq!(main_block.data_len, 3);
 
     assert!(i.is_empty(), "{:?}", i);
+    //    assert!(j.is_empty(), "{:?}", j);
 }

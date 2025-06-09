@@ -181,15 +181,15 @@ pub fn parse_heap_prune(i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u
     Ok((i, HeapOperation::Prune(heap_prune)))
 }
 
-pub fn parse_heap_truncate(i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u8]>> {
+pub fn parse_heap_truncate(_i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u8]>> {
     todo!("truncate");
 }
 
-pub fn parse_heap_hot_update(i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u8]>> {
+pub fn parse_heap_hot_update(_i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u8]>> {
     todo!("hot update");
 }
 
-pub fn parse_heap_confirm(i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u8]>> {
+pub fn parse_heap_confirm(_i: &[u8]) -> IResult<&[u8], HeapOperation, XLogError<&[u8]>> {
     todo!("hot update");
 }
 
