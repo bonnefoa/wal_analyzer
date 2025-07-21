@@ -40,7 +40,7 @@ impl PageMapping {
         }
 
         for block in &record.blocks {
-            // First, restore eventual full page images
+            // First, restore the eventual full page images
             if let Some(image) = &block.image {
                 self.apply_image(block, image)?
             }

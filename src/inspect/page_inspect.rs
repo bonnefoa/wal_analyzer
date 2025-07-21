@@ -1,8 +1,10 @@
-use nom::{
-    error::{ErrorKind, ParseError},
-    number::complete::{le_u16, le_u32},
-    IResult,
-};
+use std::mem;
+
+use log::debug;
+use nom::IResult;
+use nom::number::complete::{le_u16, le_u32};
+use nom::error::{ErrorKind, ParseError};
+use nom::Parser;
 
 use crate::xlog::common::TransactionId;
 
@@ -17,6 +19,15 @@ impl<I> ParseError<I> for InspectError<I> {
         InspectError::NomParseError(input, kind)
     }
     fn append(input: I, kind: ErrorKind, _other: Self) -> Self {
+        InspectError::NomParseError(input, kind)
+    }
+}
+
+impl<I> ParseError<(I, usize)> for InspectError<I> {
+    fn from_error_kind((input, _s): (I, usize), kind: ErrorKind) -> Self {
+        InspectError::NomParseError(input, kind)
+    }
+    fn append((input, _s): (I, usize), kind: ErrorKind, _other: Self) -> Self {
         InspectError::NomParseError(input, kind)
     }
 }
@@ -40,14 +51,15 @@ pub struct PageXLogRecPtr {
 #[derive(Debug, PartialEq)]
 pub struct ItemIdData {
     /// offset to tuple (from start of page)
-    pub lp_off: u8,
+    pub lp_off: u16,
     /// state of line pointer, see below
     pub lp_flags: u8,
     /// byte length of tuple
-    pub lp_len: u8,
+    pub lp_len: u16,
 }
 
 #[derive(Debug, PartialEq)]
+#[repr(C)]
 pub struct PageHeaderData {
     pub pd_lsn: PageXLogRecPtr,
     /// checksum
@@ -81,6 +93,25 @@ pub fn parse_rec_ptr(i: &[u8]) -> IResult<&[u8], PageXLogRecPtr, InspectError<&[
     Ok((i, PageXLogRecPtr { xlogid, xrecoff }))
 }
 
+pub fn parse_item_id_data(i: &[u8]) -> IResult<&[u8], ItemIdData, InspectError<&[u8]>> {
+    debug!("Got {:?}", i);
+    let ((i, s), lp_off) = nom::bits::complete::take(15usize)((i, 0))?;
+    let ((i, s), lp_flags) = nom::bits::complete::take(2usize)((i, s))?;
+    let ((i, _s), lp_len) = nom::bits::complete::take(15usize)((i, s))?;
+    Ok((i, ItemIdData { lp_off, lp_flags, lp_len }))
+}
+
+pub fn page_get_max_offset_number(pd_lower_u16: LocationIndex)-> usize{
+    let pd_lower= usize::from(pd_lower_u16);
+    // Should be 24
+    let size_page_header_data = mem::offset_of!(PageHeaderData, pd_linp);
+    if pd_lower <= size_page_header_data {
+        return 0;
+    }
+    // ItemIdData is 4 bytes
+    (pd_lower - size_page_header_data) / 4
+}
+
 pub fn parse_page_header(i: &[u8]) -> IResult<&[u8], PageHeaderData, InspectError<&[u8]>> {
     let (i, pd_lsn) = parse_rec_ptr(i)?;
     let (i, pd_checksum) = le_u16(i)?;
@@ -90,8 +121,11 @@ pub fn parse_page_header(i: &[u8]) -> IResult<&[u8], PageHeaderData, InspectErro
     let (i, pd_special) = le_u16(i)?;
     let (i, pd_pagesize_version) = le_u16(i)?;
     let (i, pd_prune_xid) = le_u32(i)?;
-    // TODO: Parse line pointers
-    let pd_linp = Vec::new();
+
+    let num_line_pointers = page_get_max_offset_number(pd_lower);
+    debug!("Got {:?}, count {}, pd_lower {}", i, num_line_pointers, pd_lower);
+    let (i, pd_linp) = nom::multi::count(parse_item_id_data, num_line_pointers).parse(i)?;
+    debug!("Got {:?}", i);
 
     Ok((
         i,
