@@ -1,9 +1,9 @@
 use std::mem;
 
 use nom::combinator::map;
-use nom::IResult;
-use nom::number::complete::{le_u16, le_u32};
 use nom::error::{context, ContextError, ParseError};
+use nom::number::complete::{le_u16, le_u32};
+use nom::IResult;
 use nom::Parser;
 
 use crate::xlog::common::TransactionId;
@@ -59,26 +59,37 @@ pub const PD_ALL_VISIBLE: u8 = 0x0004;
 /// OR of all valid pd_flags bits
 pub const PD_VALID_FLAG_BITS: u8 = 0x0007;
 
-fn parse_rec_ptr<'a, E: ParseError<&'a [u8]>+ContextError<&'a [u8]>> (
-    i: &'a [u8]
+fn parse_rec_ptr<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
+    i: &'a [u8],
 ) -> IResult<&'a [u8], PageXLogRecPtr, E> {
-    context("Xlog Rec",
-    map((le_u32, le_u32)
-        , |(xlogid, xrecoff)| { PageXLogRecPtr {xlogid, xrecoff} })
-    ).parse(i)
+    context(
+        "Xlog Rec",
+        map((le_u32, le_u32), |(xlogid, xrecoff)| PageXLogRecPtr {
+            xlogid,
+            xrecoff,
+        }),
+    )
+    .parse(i)
 }
 
-pub fn parse_item_id_data<'a, E: ParseError<BitInput<'a>>+ContextError<BitInput<'a>>> (
-    i: &'a [u8]
+pub fn parse_item_id_data<'a, E: ParseError<BitInput<'a>> + ContextError<BitInput<'a>>>(
+    i: &'a [u8],
 ) -> IResult<&'a [u8], ItemIdData, E> {
     let ((i, s), lp_off) = nom::bits::complete::take(15usize)((i, 0))?;
     let ((i, s), lp_flags) = nom::bits::complete::take(2usize)((i, s))?;
     let ((i, _s), lp_len) = nom::bits::complete::take(15usize)((i, s))?;
-    Ok((i, ItemIdData { lp_off, lp_flags, lp_len }))
+    Ok((
+        i,
+        ItemIdData {
+            lp_off,
+            lp_flags,
+            lp_len,
+        },
+    ))
 }
 
-fn page_get_max_offset_number(pd_lower_u16: LocationIndex)-> usize{
-    let pd_lower= usize::from(pd_lower_u16);
+fn page_get_max_offset_number(pd_lower_u16: LocationIndex) -> usize {
+    let pd_lower = usize::from(pd_lower_u16);
     // Should be 24
     let size_page_header_data = mem::offset_of!(PageHeaderData, pd_linp);
     if pd_lower <= size_page_header_data {
@@ -88,8 +99,8 @@ fn page_get_max_offset_number(pd_lower_u16: LocationIndex)-> usize{
     (pd_lower - size_page_header_data) / 4
 }
 
-pub fn parse_page_header<'a, E: ParseError<&'a [u8]>+ContextError<&'a [u8]>> (
-    i: &'a [u8]
+pub fn parse_page_header<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
+    i: &'a [u8],
 ) -> IResult<&'a [u8], PageHeaderData, E> {
     let (i, pd_lsn) = parse_rec_ptr(i)?;
     let (i, pd_checksum) = le_u16(i)?;

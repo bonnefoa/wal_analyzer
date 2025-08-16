@@ -1,8 +1,14 @@
 use crate::error::XLogError;
 use log::debug;
+use nom::branch::alt;
 use nom::bytes::complete::take;
+use nom::combinator::{map, peek, verify};
+use nom::error::{context, ContextError, ParseError};
+use nom::multi::length_data;
 use nom::number::complete::{le_u16, le_u32, le_u8};
+use nom::sequence::preceded;
 use nom::IResult;
+use nom::Parser;
 
 pub const BKPBLOCK_FORK_MASK: u8 = 0x0F;
 pub const BKPBLOCK_FLAG_MASK: u8 = 0xF0;
@@ -159,31 +165,80 @@ impl std::fmt::Display for XLBData {
     }
 }
 
-fn parse_main_data_block_header(i: &[u8]) -> IResult<&[u8], XLBData, XLogError<&[u8]>> {
-    let (i, blk_id) = le_u8(i)?;
-    if blk_id < XLR_BLOCK_ID_DATA_LONG {
-        // Not a main block header, exit
-        return Err(nom::Err::Error(XLogError::IncorrectId(blk_id)));
-    }
+// fn ws<'a, O, E: ParseError<&'a str>, F: Parser<&'a str, Output = O, Error = E>>(
+//   f: F,
+// ) -> impl Parser<&'a str, Output = O, Error = E> {
+//   delimited(first: multispace0, second: f, third: multispace0)
+// }
 
-    let (i, data_len) = if blk_id == XLR_BLOCK_ID_DATA_SHORT {
-        le_u8(i).map(|(i, x)| (i, u16::from(x)))?
-    } else {
-        le_u16(i)?
-    };
+//fn byte<'a, E: ParseError<&'a [u8]>, F: Parser<&'a [u8], Output=u8, Error = E>>(value: u8)
+//-> impl Parser<&'a [u8], Output = u8, Error = E> {
+fn byte<'a, E: ParseError<&'a [u8]>>(value: u8) -> impl Parser<&'a [u8], Output = u8, Error = E> {
+    verify(le_u8, move |u| *u == value)
+}
 
-    let data = Some(vec![0; data_len as usize]);
-    let block_header = XLBData {
-        blk_id,
-        page_id: None,
-        flags: 0,
-        image: None,
-        has_data: true,
-        data_len,
-        data,
-    };
-    debug!("Parsed main block header {}", block_header);
-    Ok((i, block_header))
+// fn parse_short_data_block_header<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
+//     i: &'a [u8],
+// ) -> IResult<&'a [u8], XLBData, E> {
+//     let parse_short_length = le_u8.map(u16::from);
+//     let parse_long_length = le_u16;
+//
+//         preceded(byte(XLR_BLOCK_ID_DATA_SHORT), parse_short_length )
+//
+//         .map(|data_len| XLBData {
+//             blk_id: XLR_BLOCK_ID_DATA_SHORT,
+//             page_id: None,
+//             flags: 0,
+//             image: None,
+//             has_data: true,
+//             data_len,
+//             data: Some(vec![0; data_len as usize]),
+//         })
+//         .parse(i)
+// }
+
+fn parse_main_data_block_header<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
+    i: &'a [u8],
+) -> IResult<&'a [u8], XLBData, E> {
+    let parse_short_length = le_u8.map(u16::from);
+    let parse_long_length = le_u16;
+
+    context(
+        "XLBData",
+        alt((
+            preceded(byte(XLR_BLOCK_ID_DATA_SHORT),
+                map(le_u8::<&'a [u8], E>, u16::from),
+            ),
+            preceded(byte(XLR_BLOCK_ID_DATA_LONG), le_u16),
+        )),
+    )
+    .parse(i);
+
+    todo!()
+    //    let (i, blk_id) = le_u8(i)?;
+    //    if blk_id < XLR_BLOCK_ID_DATA_LONG {
+    //        // Not a main block header, exit
+    //        return Err(nom::Err::Error(XLogError::IncorrectId(blk_id)));
+    //    }
+    //
+    //    let (i, data_len) = if blk_id == XLR_BLOCK_ID_DATA_SHORT {
+    //        le_u8(i).map(|(i, x)| (i, u16::from(x)))?
+    //    } else {
+    //        le_u16(i)?
+    //    };
+    //
+    //    let data = Some(vec![0; data_len as usize]);
+    //    let block_header = XLBData {
+    //        blk_id,
+    //        page_id: None,
+    //        flags: 0,
+    //        image: None,
+    //        has_data: true,
+    //        data_len,
+    //        data,
+    //    };
+    //    debug!("Parsed main block header {}", block_header);
+    //    Ok((i, block_header))
 }
 
 fn parse_relfilenode(i: &[u8]) -> IResult<&[u8], RelFileLocator, XLogError<&[u8]>> {
@@ -328,9 +383,9 @@ pub fn parse_blocks(i: &[u8]) -> IResult<&[u8], BlockResult, XLogError<&[u8]>> {
     }
 
     let main_block_start = input;
-    let (i, main_block) = parse_main_data_block_header(main_block_start)?;
-    input = i;
-    blocks.push(main_block);
+    //    let (i, main_block) = parse_main_data_block_header(main_block_start)?;
+    //    input = i;
+    //    blocks.push(main_block);
 
     // We've reached the block's data
     for block in &mut blocks {
