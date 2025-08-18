@@ -1,24 +1,15 @@
 use std::mem;
 
-use nom::combinator::map;
+use struple::Struple;
 use nom::error::{context, ContextError, ParseError};
-use nom::number::complete::{le_u16, le_u32};
+use nom::number::complete::{le_u64, le_u16, le_u32};
 use nom::IResult;
 use nom::Parser;
-
-use crate::xlog::common::TransactionId;
 
 type BitInput<'a> = (&'a [u8], usize);
 
 type LocationIndex = u16;
-
-#[derive(Debug, PartialEq)]
-pub struct PageXLogRecPtr {
-    /// high bits
-    pub xlogid: u32,
-    /// low bits
-    pub xrecoff: u32,
-}
+type TransactionId = u32;
 
 #[derive(Debug, PartialEq)]
 pub struct ItemIdData {
@@ -30,10 +21,10 @@ pub struct ItemIdData {
     pub lp_len: u16,
 }
 
-#[derive(Debug, PartialEq)]
-#[repr(C)]
+#[derive(Debug, PartialEq, Struple)]
 pub struct PageHeaderData {
-    pub pd_lsn: PageXLogRecPtr,
+    /// lSN
+    pub pd_lsn: u64,
     /// checksum
     pub pd_checksum: u16,
     /// flag bits, see below
@@ -47,6 +38,11 @@ pub struct PageHeaderData {
     pub pd_pagesize_version: u16,
     /// oldest prunable XID, or zero if none
     pub pd_prune_xid: TransactionId,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct PageHeaderDataWithLP {
+    pub page_header_data: PageHeaderData,
     pub pd_linp: Vec<ItemIdData>,
 }
 
@@ -58,19 +54,6 @@ pub const PD_PAGE_FULL: u8 = 0x0002;
 pub const PD_ALL_VISIBLE: u8 = 0x0004;
 /// OR of all valid pd_flags bits
 pub const PD_VALID_FLAG_BITS: u8 = 0x0007;
-
-fn parse_rec_ptr<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
-    i: &'a [u8],
-) -> IResult<&'a [u8], PageXLogRecPtr, E> {
-    context(
-        "Xlog Rec",
-        map((le_u32, le_u32), |(xlogid, xrecoff)| PageXLogRecPtr {
-            xlogid,
-            xrecoff,
-        }),
-    )
-    .parse(i)
-}
 
 pub fn parse_item_id_data<'a, E: ParseError<BitInput<'a>> + ContextError<BitInput<'a>>>(
     i: &'a [u8],
@@ -91,7 +74,7 @@ pub fn parse_item_id_data<'a, E: ParseError<BitInput<'a>> + ContextError<BitInpu
 fn page_get_max_offset_number(pd_lower_u16: LocationIndex) -> usize {
     let pd_lower = usize::from(pd_lower_u16);
     // Should be 24
-    let size_page_header_data = mem::offset_of!(PageHeaderData, pd_linp);
+    let size_page_header_data = mem::size_of::<PageHeaderData>();
     if pd_lower <= size_page_header_data {
         return 0;
     }
@@ -99,34 +82,51 @@ fn page_get_max_offset_number(pd_lower_u16: LocationIndex) -> usize {
     (pd_lower - size_page_header_data) / 4
 }
 
+pub fn parse_line_pointer_header<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
+    i: &'a [u8], num_lp: u16
+) -> IResult<&'a [u8], PageHeaderData, E> {
+    todo!()
+}
+
 pub fn parse_page_header<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
     i: &'a [u8],
 ) -> IResult<&'a [u8], PageHeaderData, E> {
-    let (i, pd_lsn) = parse_rec_ptr(i)?;
-    let (i, pd_checksum) = le_u16(i)?;
-    let (i, pd_flags) = le_u16(i)?;
-    let (i, pd_lower) = le_u16(i)?;
-    let (i, pd_upper) = le_u16(i)?;
-    let (i, pd_special) = le_u16(i)?;
-    let (i, pd_pagesize_version) = le_u16(i)?;
-    let (i, pd_prune_xid) = le_u32(i)?;
+    context(
+        "PageHeader",
+        (le_u64, le_u16, le_u16, le_u16, le_u16, le_u16, le_u16, le_u32)
+        .map(PageHeaderData::from_tuple)
+    ).parse(i)
+}
 
-    let num_line_pointers = page_get_max_offset_number(pd_lower);
-    let (i, pd_linp) = (i, Vec::new());
-    // let (i, pd_linp) = nom::multi::count(parse_item_id_data, num_line_pointers).parse(i)?;
 
-    Ok((
-        i,
-        PageHeaderData {
-            pd_lsn,
-            pd_checksum,
-            pd_flags,
-            pd_lower,
-            pd_upper,
-            pd_special,
-            pd_pagesize_version,
-            pd_prune_xid,
-            pd_linp,
-        },
-    ))
+#[cfg(test)]
+#[ctor::ctor]
+fn init() {
+    env_logger::init();
+}
+
+#[cfg(test)]
+use pretty_assertions::{assert_eq};
+
+#[test]
+fn test_parse_page_header() {
+    let input = b"\x0e\x00\x00\x00\x68\x7f\xd3\x8a\xf4\x9f\x00\x00\x28\x00\x80\x1f\x00\x20\x04\x20\x00\x00\x00\x00";
+    let res = parse_page_header::<nom_language::error::VerboseError<&[u8]>>(input);
+    assert!(res.is_ok(), "{:?}", res);
+    let (i, page_header) = res.unwrap();
+    assert!(i.is_empty(), "{:?}", i);
+
+    let pd_lsn = 0x892c80;
+
+    let expected_page_header = PageHeaderData {
+        pd_lsn,
+        pd_checksum: 0x9f4f,
+        pd_flags: 0,
+        pd_lower: 0x28,
+        pd_upper: 0x1f80,
+        pd_special: 0x2000,
+        pd_pagesize_version: 0x2004,
+        pd_prune_xid: 0,
+    };
+    assert_eq!(expected_page_header, page_header);
 }
