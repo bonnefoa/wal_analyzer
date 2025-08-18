@@ -116,11 +116,9 @@ fn test_parse_page_header() {
     let (i, page_header) = res.unwrap();
     assert!(i.is_empty(), "{:?}", i);
 
-    let pd_lsn = 0x892c80;
-
     let expected_page_header = PageHeaderData {
-        pd_lsn,
-        pd_checksum: 0x9f4f,
+        pd_lsn: 0x8ad37f680000000e,
+        pd_checksum: 0x9ff4,
         pd_flags: 0,
         pd_lower: 0x28,
         pd_upper: 0x1f80,
