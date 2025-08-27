@@ -1,25 +1,20 @@
 use std::mem;
 
-use struple::Struple;
-use nom::error::{context, ContextError, ParseError};
-use nom::number::complete::{le_u64, le_u16, le_u32};
+use bitter::{BitReader, LittleEndianReader};
+use log::debug;
 use nom::IResult;
 use nom::Parser;
+use nom::bytes::complete::take;
+use nom::error::{ContextError, ParseError, context};
+use nom::number::complete::{le_u16, le_u32, le_u64};
+use nom_language::error::VerboseError;
+use nom_language::error::convert_error;
+use struple::Struple;
 
 type BitInput<'a> = (&'a [u8], usize);
 
 type LocationIndex = u16;
 type TransactionId = u32;
-
-#[derive(Debug, PartialEq)]
-pub struct ItemIdData {
-    /// offset to tuple (from start of page)
-    pub lp_off: u16,
-    /// state of line pointer, see below
-    pub lp_flags: u8,
-    /// byte length of tuple
-    pub lp_len: u16,
-}
 
 #[derive(Debug, PartialEq, Struple)]
 pub struct PageHeaderData {
@@ -40,6 +35,16 @@ pub struct PageHeaderData {
     pub pd_prune_xid: TransactionId,
 }
 
+#[derive(Debug, PartialEq, Struple)]
+pub struct ItemIdData {
+    /// offset to tuple (from start of page)
+    pub lp_off: u16,
+    /// state of line pointer, see below
+    pub lp_flags: u8,
+    /// byte length of tuple
+    pub lp_len: u16,
+}
+
 #[derive(Debug, PartialEq)]
 pub struct PageHeaderDataWithLP {
     pub page_header_data: PageHeaderData,
@@ -55,20 +60,30 @@ pub const PD_ALL_VISIBLE: u8 = 0x0004;
 /// OR of all valid pd_flags bits
 pub const PD_VALID_FLAG_BITS: u8 = 0x0007;
 
-pub fn parse_item_id_data<'a, E: ParseError<BitInput<'a>> + ContextError<BitInput<'a>>>(
+/// used (should always have lp_len>0)
+pub const LP_NORMAL: u8 = 1;
+/// HOT redirect (should have lp_len=0)
+pub const LP_REDIRECT: u8 = 2;
+/// dead, may or may not have storage
+pub const LP_DEAD: u8 = 3;
+
+pub fn parse_item_id_data_bits(bytes: &[u8]) -> Option<ItemIdData> {
+    let mut bits = LittleEndianReader::new(bytes);
+    let lp_off = bits.read_bits(15)? as u16;
+    let lp_flags = bits.read_bits(2)? as u8;
+    let lp_len = bits.read_bits(15)? as u16;
+    debug!("Found itemiddata");
+    Some(ItemIdData {
+        lp_off,
+        lp_flags,
+        lp_len,
+    })
+}
+
+pub fn parse_item_id_data<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
     i: &'a [u8],
 ) -> IResult<&'a [u8], ItemIdData, E> {
-    let ((i, s), lp_off) = nom::bits::complete::take(15usize)((i, 0))?;
-    let ((i, s), lp_flags) = nom::bits::complete::take(2usize)((i, s))?;
-    let ((i, _s), lp_len) = nom::bits::complete::take(15usize)((i, s))?;
-    Ok((
-        i,
-        ItemIdData {
-            lp_off,
-            lp_flags,
-            lp_len,
-        },
-    ))
+    context("ItemIdData", take(4usize).map_opt(parse_item_id_data_bits)).parse(i)
 }
 
 fn page_get_max_offset_number(pd_lower_u16: LocationIndex) -> usize {
@@ -83,7 +98,8 @@ fn page_get_max_offset_number(pd_lower_u16: LocationIndex) -> usize {
 }
 
 pub fn parse_line_pointer_header<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
-    i: &'a [u8], num_lp: u16
+    i: &'a [u8],
+    num_lp: u16,
 ) -> IResult<&'a [u8], PageHeaderData, E> {
     todo!()
 }
@@ -93,11 +109,13 @@ pub fn parse_page_header<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
 ) -> IResult<&'a [u8], PageHeaderData, E> {
     context(
         "PageHeader",
-        (le_u64, le_u16, le_u16, le_u16, le_u16, le_u16, le_u16, le_u32)
-        .map(PageHeaderData::from_tuple)
-    ).parse(i)
+        (
+            le_u64, le_u16, le_u16, le_u16, le_u16, le_u16, le_u16, le_u32,
+        )
+            .map(PageHeaderData::from_tuple),
+    )
+    .parse(i)
 }
-
 
 #[cfg(test)]
 #[ctor::ctor]
@@ -106,12 +124,12 @@ fn init() {
 }
 
 #[cfg(test)]
-use pretty_assertions::{assert_eq};
+use pretty_assertions::assert_eq;
 
 #[test]
 fn test_parse_page_header() {
     let input = b"\x0e\x00\x00\x00\x68\x7f\xd3\x8a\xf4\x9f\x00\x00\x28\x00\x80\x1f\x00\x20\x04\x20\x00\x00\x00\x00";
-    let res = parse_page_header::<nom_language::error::VerboseError<&[u8]>>(input);
+    let res = parse_page_header::<VerboseError<&[u8]>>(input);
     assert!(res.is_ok(), "{:?}", res);
     let (i, page_header) = res.unwrap();
     assert!(i.is_empty(), "{:?}", i);
@@ -127,4 +145,20 @@ fn test_parse_page_header() {
         pd_prune_xid: 0,
     };
     assert_eq!(expected_page_header, page_header);
+}
+
+#[test]
+fn test_parse_item_id_data() {
+    let input = b"\x80\x9f\x38\x00";
+    let res = parse_item_id_data::<VerboseError<&[u8]>>(input);
+    assert!(res.is_ok(), "{:?}", res.unwrap_err());
+    let (i, item_id_data) = res.unwrap();
+    assert!(i.is_empty(), "{:?}", i);
+
+    let expected_item_id_data = ItemIdData {
+        lp_off: 8064,
+        lp_flags: LP_NORMAL,
+        lp_len: 28,
+    };
+    assert_eq!(expected_item_id_data, item_id_data);
 }
