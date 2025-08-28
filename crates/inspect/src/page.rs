@@ -8,14 +8,14 @@ use nom::bytes::complete::take;
 use nom::error::{ContextError, ParseError, context};
 use nom::multi::count;
 use nom::number::complete::{le_u16, le_u32, le_u64};
-use nom_language::error::VerboseError;
-use nom_language::error::convert_error;
 use struple::Struple;
 
 type LocationIndex = u16;
 type TransactionId = u32;
 type CommandId = u32;
 type Oid = u32;
+type BlockIdData = u32;
+type OffsetNumber = u16;
 
 #[derive(Debug, PartialEq)]
 pub struct ItemIdData {
@@ -49,7 +49,7 @@ pub struct PageHeaderData {
     pub pd_linp: Vec<ItemIdData>,
 }
 
-#[derive(Debug, PartialEq, Struple)]
+#[derive(Debug, PartialEq)]
 pub struct HeapTupleFields {
     /// Inserting xact ID
     pub xmin: TransactionId,
@@ -59,16 +59,41 @@ pub struct HeapTupleFields {
     pub t_cid: CommandId,
 }
 
-#[derive(Debug, PartialEq, Struple)]
+#[derive(Debug, PartialEq)]
 pub struct DatumTupleFields {
+    /// varlena header
     pub datum_len: i32,
+    /// -1, or identifier of a record type
     pub datum_typmod: i32,
+    /// Composite type OID, or RECORDOID
     pub datum_typeid: Oid,
 }
 
-#[derive(Debug, PartialEq, Struple)]
-pub struct PageData {
-    pub page_header_data: PageHeaderData,
+#[derive(Debug, PartialEq)]
+pub enum TupleChoice {
+    Heap(HeapTupleFields),
+    Datum(DatumTupleFields),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ItemPointerData {
+    pub ip_blkid: BlockIdData,
+    pub ip_posid: BlockIdData,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct HeapTupleHeaderData {
+    pub t_choice: TupleChoice,
+    /// Current TID of this or newer tuple (or a speculative insertion token)
+    pub t_ctid: ItemPointerData,
+    /// Number of attributes + various flags
+    pub t_infomask2: u16,
+    /// various flags bits
+    pub t_infomask: u16,
+    /// sizeof header incl. bitmap, padding
+    pub t_hoff: u8,
+    /// bitmaps of NULLs
+    pub t_bits: Vec<u8>,
 }
 
 /// are there any unused line pointers?
@@ -120,14 +145,7 @@ fn max_offset_number(pd_lower_u16: LocationIndex) -> usize {
     (pd_lower - size_page_header_data) / 4
 }
 
-///// Parse multiple line pointers
-//fn parse_line_pointers<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
-//    i: &'a [u8],
-//    num_lp: usize,
-//) -> IResult<&'a [u8], Vec<ItemIdData>, E> {
-//    context("LinePointers", count(parse_line_pointer, num_lp))
-//}
-
+/// Parse multiple line pointers
 pub fn parse_line_pointers<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
     t: (&'a [u8], HeaderTypes),
 ) -> IResult<&'a [u8], PageHeaderData, E> {
@@ -174,72 +192,78 @@ pub fn parse_page_header<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
     .and_then(parse_line_pointers)
 }
 
-/// Parse page with header and data
-pub fn parse_page<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
-    i: &'a [u8],
-) -> IResult<&'a [u8], PageData, E> {
-    context("PageData", parse_page_header.map(PageData)).parse(i)
-}
+///// Parse page with header and data
+//pub fn parse_page<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
+//    i: &'a [u8],
+//) -> IResult<&'a [u8], PageData, E> {
+//    context("PageData", parse_page_header.map(PageData)).parse(i)
+//}
 
 #[cfg(test)]
-#[ctor::ctor]
-fn init() {
-    env_logger::init();
-}
+mod tests {
+    use nom_language::error::VerboseError;
+    use pretty_assertions::assert_eq;
 
-#[cfg(test)]
-use pretty_assertions::assert_eq;
-
-#[test]
-fn test_parse_page_header() {
-    let input = b"\x0e\x00\x00\x00\x68\x7f\xd3\x8a\xf4\x9f\x00\x00\x28\x00\x80\x1f\x00\x20\x04\x20\x00\x00\x00\x00";
-    let res = parse_page_header::<VerboseError<&[u8]>>(input);
-    assert!(res.is_ok(), "{:?}", res);
-    let (i, page_header) = res.unwrap();
-    assert!(i.is_empty(), "{:?}", i);
-
-    let expected_page_header = PageHeaderData {
-        pd_lsn: 0x8ad37f680000000e,
-        pd_checksum: 0x9ff4,
-        pd_flags: 0,
-        pd_lower: 0x28,
-        pd_upper: 0x1f80,
-        pd_special: 0x2000,
-        pd_pagesize_version: 0x2004,
-        pd_prune_xid: 0,
-        pd_linp: Vec::new(),
+    use crate::page::{
+        ItemIdData, LP_NORMAL, PageHeaderData, parse_line_pointer, parse_page_header,
     };
-    assert_eq!(expected_page_header, page_header);
-}
 
-#[test]
-fn test_parse_line_pointer() {
-    let input = b"\x80\x9f\x38\x00";
-    let res = parse_line_pointer::<VerboseError<&[u8]>>(input);
-    assert!(res.is_ok(), "{:?}", res.unwrap_err());
-    let (i, item_id_data) = res.unwrap();
-    assert!(i.is_empty(), "{:?}", i);
+    #[ctor::ctor]
+    fn init() {
+        env_logger::init();
+    }
 
-    let expected_item_id_data = ItemIdData {
-        lp_off: 8064,
-        lp_flags: LP_NORMAL,
-        lp_len: 28,
-    };
-    assert_eq!(expected_item_id_data, item_id_data);
-}
+    #[test]
+    fn test_parse_page_header() {
+        let input = b"\x0e\x00\x00\x00\x68\x7f\xd3\x8a\xf4\x9f\x00\x00\x28\x00\x80\x1f\x00\x20\x04\x20\x00\x00\x00\x00";
+        let res = parse_page_header::<VerboseError<&[u8]>>(input);
+        assert!(res.is_ok(), "{:?}", res);
+        let (i, page_header) = res.unwrap();
+        assert!(i.is_empty(), "{:?}", i);
 
-#[test]
-fn test_parse_page() {
-    let input = include_bytes!("../assets/test_page");
-    let res = parse_line_pointer::<VerboseError<&[u8]>>(input);
-    assert!(res.is_ok(), "{:?}", res.unwrap_err());
-    let (i, item_id_data) = res.unwrap();
-    assert!(i.is_empty(), "{:?}", i);
+        let expected_page_header = PageHeaderData {
+            pd_lsn: 0x8ad37f680000000e,
+            pd_checksum: 0x9ff4,
+            pd_flags: 0,
+            pd_lower: 0x28,
+            pd_upper: 0x1f80,
+            pd_special: 0x2000,
+            pd_pagesize_version: 0x2004,
+            pd_prune_xid: 0,
+            pd_linp: Vec::new(),
+        };
+        assert_eq!(expected_page_header, page_header);
+    }
 
-    let expected_item_id_data = ItemIdData {
-        lp_off: 8064,
-        lp_flags: LP_NORMAL,
-        lp_len: 28,
-    };
-    assert_eq!(expected_item_id_data, item_id_data);
+    #[test]
+    fn test_parse_line_pointer() {
+        let input = b"\x80\x9f\x38\x00";
+        let res = parse_line_pointer::<VerboseError<&[u8]>>(input);
+        assert!(res.is_ok(), "{:?}", res.unwrap_err());
+        let (i, item_id_data) = res.unwrap();
+        assert!(i.is_empty(), "{:?}", i);
+
+        let expected_item_id_data = ItemIdData {
+            lp_off: 8064,
+            lp_flags: LP_NORMAL,
+            lp_len: 28,
+        };
+        assert_eq!(expected_item_id_data, item_id_data);
+    }
+
+    #[test]
+    fn test_parse_page() {
+        let input = include_bytes!("../assets/test_page");
+        let res = parse_line_pointer::<VerboseError<&[u8]>>(input);
+        assert!(res.is_ok(), "{:?}", res.unwrap_err());
+        let (i, item_id_data) = res.unwrap();
+        assert!(i.is_empty(), "{:?}", i);
+
+        let expected_item_id_data = ItemIdData {
+            lp_off: 8064,
+            lp_flags: LP_NORMAL,
+            lp_len: 28,
+        };
+        assert_eq!(expected_item_id_data, item_id_data);
+    }
 }
