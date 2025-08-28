@@ -10,12 +10,8 @@ use nom::multi::count;
 use nom::number::complete::{le_u16, le_u32, le_u64};
 use struple::Struple;
 
-type LocationIndex = u16;
-type TransactionId = u32;
-type CommandId = u32;
-type Oid = u32;
-type BlockIdData = u32;
-type OffsetNumber = u16;
+pub type LocationIndex = u16;
+pub type TransactionId = u32;
 
 #[derive(Debug, PartialEq)]
 pub struct ItemIdData {
@@ -47,53 +43,6 @@ pub struct PageHeaderData {
     /// oldest prunable XID, or zero if none
     pub pd_prune_xid: TransactionId,
     pub pd_linp: Vec<ItemIdData>,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct HeapTupleFields {
-    /// Inserting xact ID
-    pub xmin: TransactionId,
-    /// Deleting or locking xact ID
-    pub xmax: TransactionId,
-    /// Inserting or deleting command ID, or both
-    pub t_cid: CommandId,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct DatumTupleFields {
-    /// varlena header
-    pub datum_len: i32,
-    /// -1, or identifier of a record type
-    pub datum_typmod: i32,
-    /// Composite type OID, or RECORDOID
-    pub datum_typeid: Oid,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum TupleChoice {
-    Heap(HeapTupleFields),
-    Datum(DatumTupleFields),
-}
-
-#[derive(Debug, PartialEq)]
-pub struct ItemPointerData {
-    pub ip_blkid: BlockIdData,
-    pub ip_posid: BlockIdData,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct HeapTupleHeaderData {
-    pub t_choice: TupleChoice,
-    /// Current TID of this or newer tuple (or a speculative insertion token)
-    pub t_ctid: ItemPointerData,
-    /// Number of attributes + various flags
-    pub t_infomask2: u16,
-    /// various flags bits
-    pub t_infomask: u16,
-    /// sizeof header incl. bitmap, padding
-    pub t_hoff: u8,
-    /// bitmaps of NULLs
-    pub t_bits: Vec<u8>,
 }
 
 /// are there any unused line pointers?
@@ -146,7 +95,7 @@ fn max_offset_number(pd_lower_u16: LocationIndex) -> usize {
 }
 
 /// Parse multiple line pointers
-pub fn parse_line_pointers<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
+fn parse_line_pointers<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
     t: (&'a [u8], HeaderTypes),
 ) -> IResult<&'a [u8], PageHeaderData, E> {
     let (
@@ -179,7 +128,7 @@ pub fn parse_line_pointers<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>
 }
 
 /// Parse page header without line pointers
-pub fn parse_page_header<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
+fn parse_page_header<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
     i: &'a [u8],
 ) -> IResult<&'a [u8], PageHeaderData, E> {
     context(
