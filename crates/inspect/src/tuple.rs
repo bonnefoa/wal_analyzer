@@ -1,10 +1,12 @@
 use log::debug;
 use nom::Parser;
+use nom::number::complete::le_i32;
 use nom::{
     IResult,
     error::{ContextError, ParseError, context},
     number::complete::le_u32,
 };
+use struple::Struple;
 
 use crate::page::TransactionId;
 
@@ -40,7 +42,7 @@ impl HeapTupleFields {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Struple)]
 pub struct DatumTupleFields {
     /// varlena header
     pub datum_len: i32,
@@ -84,13 +86,28 @@ fn parse_heap_tuple_fields<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>
     .parse(i)
 }
 
+fn parse_datum_tuple_fields<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
+    i: &'a [u8],
+) -> IResult<&'a [u8], DatumTupleFields, E> {
+    context(
+        "DatumTupleFields",
+        (le_i32, le_i32, le_u32).map(DatumTupleFields::from_tuple),
+    )
+    .parse(i)
+}
+
+fn parse_heap_header_data<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
+    i: &'a [u8],
+) -> IResult<&'a [u8], HeapTupleHeaderData, E> {
+    context(
+        "HeapHeaderData",
+        (le_u32, le_u32, le_u32).map(|t| HeapTupleFields::new(is_cid, t)),
+    )
+    .parse(i)
+}
+
 #[cfg(test)]
 mod tests {
     use nom_language::error::VerboseError;
     use pretty_assertions::assert_eq;
-
-    #[ctor::ctor]
-    fn init() {
-        env_logger::init();
-    }
 }
