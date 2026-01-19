@@ -436,7 +436,7 @@ fn parse_data_block_header<'a>(
 
 type BlockResult<'a> = (&'a [u8], Vec<XLBData>);
 
-pub fn parse_blocks(i: &[u8]) -> IResult<&[u8], BlockResult, XLogError<&[u8]>> {
+pub fn parse_blocks(i: &[u8]) -> IResult<&[u8], BlockResult<'_>, XLogError<&[u8]>> {
     let mut blocks = Vec::new();
     let mut input = i;
     loop {
