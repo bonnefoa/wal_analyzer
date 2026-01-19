@@ -5,9 +5,8 @@ use crate::xlog::record::RmgrId;
 use log::debug;
 use nom::branch::alt;
 use nom::bytes::complete::take;
-use nom::combinator::{map, peek, verify};
+use nom::combinator::{map, verify};
 use nom::error::{context, ContextError, ParseError};
-use nom::multi::length_data;
 use nom::number::complete::{le_u16, le_u32, le_u8};
 use nom::sequence::preceded;
 use nom::IResult;
@@ -190,21 +189,21 @@ pub struct XLogRecordBlockImageHeader {
 
 #[derive(Debug, Clone)]
 pub struct XLBData {
-    blk_id: u8,
+    pub blk_id: u8,
 
     // Identify the block this refers to
-    page_id: Option<PageId>,
+    pub page_id: Option<PageId>,
 
     // Copy of fork_flags field from the block header
-    flags: u8,
+    pub flags: u8,
 
     // Information on full-page image, if any
-    image: Option<XLBImage>,
+    pub image: Option<XLBImage>,
 
     // TODO: Probably redundant
-    has_data: bool,
-    data_len: u16,
-    data: Option<Vec<u8>>,
+    pub has_data: bool,
+    pub data_len: u16,
+    pub data: Option<Vec<u8>>,
 }
 
 impl std::fmt::Display for XLBData {

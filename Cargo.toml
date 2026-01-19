@@ -33,3 +33,7 @@ nom-language = "0.1.0"
 [[bin]]
 name = "wal_analyzer"
 path = "src/main.rs"
+
+[workspace]
+resolver = "3"
+members = ["inspect"]
