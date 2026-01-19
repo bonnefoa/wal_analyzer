@@ -1,4 +1,7 @@
 use crate::error::XLogError;
+use crate::xlog::common::TransactionId;
+use crate::xlog::reader::XLogRecPtr;
+use crate::xlog::record::RmgrId;
 use log::debug;
 use nom::branch::alt;
 use nom::bytes::complete::take;
@@ -120,23 +123,88 @@ impl std::fmt::Display for XLBImage {
     }
 }
 
+/*
+ * The overall layout of an XLOG record is:
+ *      Fixed-size header (XLogRecord struct)
+ *      XLogRecordBlockHeader struct
+ *      XLogRecordBlockHeader struct
+ *      ...
+ *      XLogRecordDataHeader[Short|Long] struct
+ *      block data
+ *      block data
+ *      ...
+ *      main data
+ *
+ * There can be zero or more XLogRecordBlockHeaders, and 0 or more bytes of
+ * rmgr-specific data not associated with a block.  XLogRecord structs
+ * always start on MAXALIGN boundaries in the WAL files, but the rest of
+ * the fields are not aligned.
+ *
+ * The XLogRecordBlockHeader, XLogRecordDataHeaderShort and
+ * XLogRecordDataHeaderLong structs all begin with a single 'id' byte. It's
+ * used to distinguish between block references, and the main data structs.
+ */
+#[derive(Debug, Clone)]
+pub struct XLogRecord {
+    /// total length of entier record
+    xl_tot_len: u32,
+    /// xact id
+    xl_xid: TransactionId,
+    /// ptr to previous record
+    xl_prev: XLogRecPtr,
+    /// flag bits
+    xl_info: u8,
+    /// resource manager for this record
+    xl_rmid: RmgrId,
+    /// CRC for this record
+    xl_crc: u32,
+
+    xl_block_headers: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct XLogRecordBlockHeader {
+    /// block reference ID
+    id: u8,
+    /// fork within the relation, and flags
+    fork_flags: u8,
+    /// number of payload bytes (not including page image)
+    data_length: u16,
+
+    block_img: Option<XLogRecordBlockImageHeader>,
+}
+
+#[derive(Debug, Clone)]
+pub struct XLogRecordBlockImageHeader {
+    /// number of page image bytes
+    length: u16,
+    /// number of bytes before "hole"
+    hole_offset: u16,
+    /// flag bits
+    bimg_info: u16,
+
+    /// if BKPIMAGE_HAS_HOLE and BKPIMAGE_COMPRESSED, page
+    /// image has "hole" and is compressed
+    hole_length: Option<u16>,
+}
+
 #[derive(Debug, Clone)]
 pub struct XLBData {
-    pub blk_id: u8,
+    blk_id: u8,
 
     // Identify the block this refers to
-    pub page_id: Option<PageId>,
+    page_id: Option<PageId>,
 
     // Copy of fork_flags field from the block header
-    pub flags: u8,
+    flags: u8,
 
     // Information on full-page image, if any
-    pub image: Option<XLBImage>,
+    image: Option<XLBImage>,
 
     // TODO: Probably redundant
-    pub has_data: bool,
-    pub data_len: u16,
-    pub data: Option<Vec<u8>>,
+    has_data: bool,
+    data_len: u16,
+    data: Option<Vec<u8>>,
 }
 
 impl std::fmt::Display for XLBData {
@@ -200,13 +268,14 @@ fn byte<'a, E: ParseError<&'a [u8]>>(value: u8) -> impl Parser<&'a [u8], Output 
 fn parse_main_data_block_header<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
     i: &'a [u8],
 ) -> IResult<&'a [u8], XLBData, E> {
-    let parse_short_length = le_u8.map(u16::from);
-    let parse_long_length = le_u16;
+    //    let parse_short_length = le_u8.map(u16::from);
+    //    let parse_long_length = le_u16;
 
     context(
-        "XLBData",
+        "Xlog_Block",
         alt((
-            preceded(byte(XLR_BLOCK_ID_DATA_SHORT),
+            preceded(
+                byte(XLR_BLOCK_ID_DATA_SHORT),
                 map(le_u8::<&'a [u8], E>, u16::from),
             ),
             preceded(byte(XLR_BLOCK_ID_DATA_LONG), le_u16),

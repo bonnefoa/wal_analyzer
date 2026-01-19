@@ -46,20 +46,20 @@ pub struct PageHeaderData {
 }
 
 /// are there any unused line pointers?
-pub const PD_HAS_FREE_LINES: u8 = 0x0001;
+const PD_HAS_FREE_LINES: u8 = 0x0001;
 /// not enough free space for new tuple?
-pub const PD_PAGE_FULL: u8 = 0x0002;
+const PD_PAGE_FULL: u8 = 0x0002;
 /// all tuples on page are visible to everyone
-pub const PD_ALL_VISIBLE: u8 = 0x0004;
+const PD_ALL_VISIBLE: u8 = 0x0004;
 /// OR of all valid pd_flags bits
-pub const PD_VALID_FLAG_BITS: u8 = 0x0007;
+const PD_VALID_FLAG_BITS: u8 = 0x0007;
 
 /// used (should always have lp_len>0)
-pub const LP_NORMAL: u8 = 1;
+const LP_NORMAL: u8 = 1;
 /// HOT redirect (should have lp_len=0)
-pub const LP_REDIRECT: u8 = 2;
+const LP_REDIRECT: u8 = 2;
 /// dead, may or may not have storage
-pub const LP_DEAD: u8 = 3;
+const LP_DEAD: u8 = 3;
 
 /// Parse bits into ItemIdData
 fn parse_item_id_data_bits(bytes: &[u8]) -> Option<ItemIdData> {
@@ -140,13 +140,6 @@ fn parse_page_header<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
     .parse(i)
     .and_then(parse_line_pointers)
 }
-
-///// Parse page with header and data
-//pub fn parse_page<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
-//    i: &'a [u8],
-//) -> IResult<&'a [u8], PageData, E> {
-//    context("PageData", parse_page_header.map(PageData)).parse(i)
-//}
 
 #[cfg(test)]
 mod tests {
