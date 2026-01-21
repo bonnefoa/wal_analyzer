@@ -11,6 +11,7 @@ log = "0.4.27"
 nom = "8.0.0"
 nom-language = "0.1.0"
 struple = "0.2.0"
+thiserror = "2.0.18"
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"

@@ -1,7 +1,6 @@
-use log::debug;
 use nom::Parser;
 use nom::bytes::take;
-use nom::number::complete::{le_i32, le_u8, le_u16};
+use nom::number::complete::{le_u8, le_u16};
 use nom::{
     IResult,
     error::{ContextError, ParseError, context},
@@ -104,25 +103,24 @@ fn parse_heap_tuple_fields<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>
 type HeapHeaderTypes = (HeapTupleFields, ItemPointerData, u16, u16, u8);
 type HeapHeaderTypesWithBitmaps = (HeapTupleFields, ItemPointerData, u16, u16, u8, Vec<u8>);
 fn parse_bitmaps<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
-    t: (&'a [u8], HeapHeaderTypes),
-) -> IResult<&'a [u8], HeapTupleHeaderData, E> {
-    let (i, (t_heap, t_ctid, t_infomask2, t_infomask, t_hoff)) = t;
+    t: HeapHeaderTypes,
+) -> nom::Map<
+    impl Parser<&'a [u8], Output = &'a [u8], Error = E>,
+    impl FnMut(&'a [u8]) -> HeapTupleHeaderData,
+> {
+    let (t_heap, t_ctid, t_infomask2, t_infomask, t_hoff) = t;
     let natts = t_infomask2 & HEAP_NATTS_MASK;
-    let bitmap_len = ((natts + 7) / 8) * 8;
-    context(
-        "Bitmaps",
-        take(bitmap_len).map(|bitmaps: &'a [u8]| {
-            HeapTupleHeaderData::new(
-                t_heap,
-                t_ctid,
-                t_infomask2,
-                t_infomask,
-                t_hoff,
-                bitmaps.to_vec(),
-            )
-        }),
-    )
-    .parse(i)
+    let bitmap_len = natts.div_ceil(8) * 8;
+    take(bitmap_len).map(move |bitmaps: &'a [u8]| {
+        HeapTupleHeaderData::new(
+            t_heap.clone(),
+            t_ctid.clone(),
+            t_infomask2,
+            t_infomask,
+            t_hoff,
+            bitmaps.to_vec(),
+        )
+    })
 }
 
 fn parse_heap_header_data<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
@@ -137,7 +135,7 @@ fn parse_heap_header_data<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
             le_u16,
             le_u8,
         )
-            .and_then(parse_bitmaps),
+            .flat_map(parse_bitmaps),
     )
     .parse(i)
 }
