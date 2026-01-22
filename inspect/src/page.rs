@@ -1,9 +1,5 @@
-use std::fmt::Display;
-use std::fmt::Formatter;
-
 use bitter::{BitReader, LittleEndianReader};
 use log::debug;
-use log::info;
 use nom::IResult;
 use nom::Input;
 use nom::Parser;
@@ -13,10 +9,12 @@ use nom::multi::count;
 use nom::number::complete::{le_u8, le_u16, le_u32};
 use struple::Struple;
 
+use crate::pg_lsn::PageXLogRecPtr;
+
 pub type LocationIndex = u16;
 pub type TransactionId = u32;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Struple)]
 pub struct ItemIdData {
     /// offset to tuple (from start of page)
     pub lp_off: u16,
@@ -24,49 +22,6 @@ pub struct ItemIdData {
     pub lp_flags: u8,
     /// byte length of tuple
     pub lp_len: u16,
-}
-
-#[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct PageXLogRecPtr {
-    xlogid: u32,
-    xrecoff: u32,
-}
-
-impl Display for PageXLogRecPtr {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        // format ourselves as a `ffffffff/ffffffff` string
-        write!(f, "{0:X}/{1:08X}", self.xlogid, self.xrecoff)
-    }
-}
-
-#[derive(Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, thiserror::Error)]
-pub enum InvalidLSN {
-    #[error("Invalid LSN Format '{0}'")]
-    Format(String),
-    #[error("Invalid hex value in '{0}': `{1}`")]
-    HexValue(String, String),
-}
-
-impl TryFrom<&str> for PageXLogRecPtr {
-    type Error = InvalidLSN;
-
-    fn try_from(lsn: &str) -> Result<Self, Self::Error> {
-        let mut iter = lsn.split('/');
-        let Some(xlogid_str) = iter.next() else {
-            return Err(InvalidLSN::Format(lsn.to_string()));
-        };
-        let xlogid = match u32::from_str_radix(xlogid_str, 16) {
-            Ok(xlogid) => xlogid,
-            Err(e) => return Err(InvalidLSN::HexValue(lsn.to_string(), e.to_string())),
-        };
-
-        let xrecoff_str = iter.next().unwrap();
-        let xrecoff = match u32::from_str_radix(xrecoff_str, 16) {
-            Ok(xrecoff) => xrecoff,
-            Err(e) => return Err(InvalidLSN::HexValue(lsn.to_string(), e.to_string())),
-        };
-        Ok(PageXLogRecPtr { xlogid, xrecoff })
-    }
 }
 
 #[derive(Debug, PartialEq, Struple)]
@@ -109,18 +64,14 @@ const LP_DEAD: u8 = 3;
 const PAGE_HEADER_MEM_SIZE: usize = 24;
 const ITEM_ID_DATA_MEM_SIZE: usize = 4;
 
-type HeaderTypes = (PageXLogRecPtr, u16, u16, u16, u16, u16, u8, u16, u32);
-
 fn parse_lsn<I, E: ParseError<I>>(i: I) -> IResult<I, PageXLogRecPtr, E>
 where
     I: Input<Item = u8>,
 {
-    (le_u32, le_u32)
-        .map(|(xlogid, xrecoff)| PageXLogRecPtr { xlogid, xrecoff })
-        .parse(i)
+    (le_u32, le_u32).map(PageXLogRecPtr::new).parse(i)
 }
 
-fn le_pagesize<I, E: ParseError<I>>(i: I) -> IResult<I, u16, E>
+fn parse_pagesize<I, E: ParseError<I>>(i: I) -> IResult<I, u16, E>
 where
     I: Input<Item = u8>,
 {
@@ -135,19 +86,31 @@ fn parse_page<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
         "PageHeader",
         (
             parse_lsn,
-            le_u16,      // Checksum
-            le_u16,      // flags
-            le_u16,      // lower
-            le_u16,      // upper
-            le_u16,      // special
-            le_u8,       // version
-            le_pagesize, // pagesize
-            le_u32,      // prune_xid
+            le_u16,         // Checksum
+            le_u16,         // flags
+            le_u16,         // lower
+            le_u16,         // upper
+            le_u16,         // special
+            le_u8,          // version
+            parse_pagesize, // pagesize
+            le_u32,         // prune_xid
         ),
     )
     .parse(i)
     .and_then(parse_line_pointers)
 }
+
+type HeaderTypes = (
+    PageXLogRecPtr,
+    u16,
+    u16,
+    LocationIndex,
+    LocationIndex,
+    LocationIndex,
+    u8,
+    u16,
+    TransactionId,
+);
 
 /// Parse multiple line pointers
 fn parse_line_pointers<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
@@ -168,7 +131,6 @@ fn parse_line_pointers<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
         ),
     ) = t;
     let num_lp = max_offset_number(pd_lower);
-    info!("Found {num_lp} line pointers");
     count(parse_line_pointer, num_lp)
         .map(|pd_linp| PageHeaderData {
             pd_lsn,
