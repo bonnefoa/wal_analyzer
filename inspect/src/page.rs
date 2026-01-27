@@ -1,15 +1,18 @@
 use bitter::{BitReader, LittleEndianReader};
+use itertools::Itertools;
 use nom::IResult;
 use nom::Input;
 use nom::Parser;
 use nom::bytes::complete::take;
-use nom::combinator::flat_map;
 use nom::error::ParseError;
 use nom::multi::count;
 use nom::number::complete::{le_u8, le_u16, le_u32};
 use struple::Struple;
 
 use crate::pg_lsn::PageXLogRecPtr;
+use crate::tuple::HeapTuple;
+use crate::tuple::HeapTupleHeader;
+use crate::tuple::parse_heap_tuple;
 
 pub type LocationIndex = u16;
 pub type TransactionId = u32;
@@ -37,17 +40,23 @@ pub struct PageHeader {
 #[derive(Debug, PartialEq, Struple)]
 pub struct Page {
     pub header: PageHeader,
-    pub pd_linp: Vec<ItemIdData>,
+    pub pd_linp: Vec<ItemId>,
+    // Other approach: Store page bytes and access tuples on demand
+    pub tuples: Vec<HeapTuple>,
 }
 
 #[derive(Debug, PartialEq, Struple)]
-pub struct ItemIdData {
+pub struct ItemId {
     /// offset to tuple (from start of page)
     pub lp_off: u16,
     /// state of line pointer, see below
     pub lp_flags: u8,
     /// byte length of tuple
     pub lp_len: u16,
+}
+
+impl Page {
+
 }
 
 /// are there any unused line pointers?
@@ -68,6 +77,7 @@ const LP_DEAD: u8 = 3;
 
 const PAGE_HEADER_MEM_SIZE: usize = 24;
 const ITEM_ID_DATA_MEM_SIZE: usize = 4;
+pub const PAGE_SIZE: usize = 4;
 
 fn parse_lsn<I, E: ParseError<I>>(input: I) -> IResult<I, PageXLogRecPtr, E>
 where
@@ -88,7 +98,26 @@ fn parse_page<I, E: ParseError<I>>(input: I) -> IResult<I, Page, E>
 where
     I: Input<Item = u8>,
 {
-    flat_map(parse_header, parse_line_pointers).parse(input)
+    let (page_bytes, rest) = input.take_split(PAGE_SIZE);
+
+    let (header_bytes, header) = parse_header.parse(page_bytes.clone())?;
+    let (_, pd_linp) = parse_line_pointers(header).parse(header_bytes)?;
+
+    let tuples: Vec<HeapTuple> = pd_linp
+        .iter()
+        .map(|lp| page_bytes.take_from(lp.lp_off as usize))
+        .map(parse_heap_tuple::<I, E>)
+        .map_ok(|a| a.1)
+        .try_collect()?;
+
+    Ok((
+        rest,
+        Page {
+            header,
+            pd_linp,
+            tuples,
+        },
+    ))
 }
 
 fn parse_header<I, E: ParseError<I>>(input: I) -> IResult<I, PageHeader, E>
@@ -122,16 +151,24 @@ fn max_offset_number(pd_lower_u16: LocationIndex) -> usize {
 /// Parse multiple line pointers
 fn parse_line_pointers<I, E: ParseError<I>>(
     header: PageHeader,
-) -> impl Parser<I, Output = Page, Error = E>
+) -> impl Parser<I, Output = Vec<ItemId>, Error = E>
 where
     I: Input<Item = u8>,
 {
     let num_lp = max_offset_number(header.pd_lower);
-    count(parse_line_pointer, num_lp).map(move |pd_linp| Page { header, pd_linp })
+    count(parse_line_pointer, num_lp)
 }
 
-/// Parse bits into ItemIdData
-fn parse_item_id_data_bits<I>(input: I) -> Option<ItemIdData>
+/// Parse a single line pointer
+fn parse_line_pointer<I, E: ParseError<I>>(input: I) -> IResult<I, ItemId, E>
+where
+    I: Input<Item = u8>,
+{
+    take(4usize).map_opt(parse_item_id_data_bits).parse(input)
+}
+
+/// Parse bits into ItemId
+fn parse_item_id_data_bits<I>(input: I) -> Option<ItemId>
 where
     I: Input<Item = u8>,
 {
@@ -144,19 +181,11 @@ where
     let lp_off = bits.read_bits(15)? as u16;
     let lp_flags = bits.read_bits(2)? as u8;
     let lp_len = bits.read_bits(15)? as u16;
-    Some(ItemIdData {
+    Some(ItemId {
         lp_off,
         lp_flags,
         lp_len,
     })
-}
-
-/// Parse a single line pointer
-fn parse_line_pointer<I, E: ParseError<I>>(input: I) -> IResult<I, ItemIdData, E>
-where
-    I: Input<Item = u8>,
-{
-    take(4usize).map_opt(parse_item_id_data_bits).parse(input)
 }
 
 #[cfg(test)]
@@ -165,7 +194,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use crate::page::{
-        ItemIdData, LP_NORMAL, Page, PageHeader, max_offset_number, parse_line_pointer, parse_page,
+        ItemId, LP_NORMAL, Page, PageHeader, max_offset_number, parse_line_pointer, parse_page,
     };
 
     #[ctor::ctor]
@@ -181,7 +210,7 @@ mod tests {
         let (i, item_id_data) = res.unwrap();
         assert!(i.is_empty(), "{:?}", i);
 
-        let expected_item_id_data = ItemIdData {
+        let expected_item_id_data = ItemId {
             lp_off: 8064,
             lp_flags: LP_NORMAL,
             lp_len: 28,
@@ -197,17 +226,18 @@ mod tests {
         let (i, page) = res.unwrap();
 
         let expected_linp = vec![
-            ItemIdData {
+            ItemId {
                 lp_off: 8160,
                 lp_flags: 1,
                 lp_len: 28,
             },
-            ItemIdData {
+            ItemId {
                 lp_off: 8128,
                 lp_flags: 1,
                 lp_len: 28,
             },
         ];
+        let expected_heap_tuples = vec![];
 
         let expected_page = Page {
             header: PageHeader {
@@ -222,6 +252,7 @@ mod tests {
                 pd_prune_xid: 0,
             },
             pd_linp: expected_linp,
+            tuples: expected_heap_tuples,
         };
         assert_eq!(expected_page, page);
 

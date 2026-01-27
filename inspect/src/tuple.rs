@@ -1,14 +1,10 @@
-use nom::Parser;
 use nom::bytes::take;
 use nom::number::complete::{le_u8, le_u16};
-use nom::{
-    IResult,
-    error::{ContextError, ParseError, context},
-    number::complete::le_u32,
-};
+use nom::{IResult, error::ParseError, number::complete::le_u32};
+use nom::{Input, Parser};
 use struple::Struple;
 
-use crate::page::TransactionId;
+use crate::page::{PAGE_SIZE, TransactionId};
 
 pub type CommandId = u32;
 pub type Oid = u32;
@@ -16,26 +12,19 @@ pub type BlockIdData = u32;
 pub type OffsetNumber = u16;
 
 #[derive(Debug, PartialEq, Struple, Clone)]
-pub struct HeapTupleFields {
-    /// Inserting xact ID
-    pub xmin: TransactionId,
-    /// Deleting or locking xact ID
-    pub xmax: TransactionId,
-
-    /// Inserting or deleting command ID, or both
-    pub t_cid: CommandId,
-}
-
-#[derive(Debug, PartialEq, Struple, Clone)]
 pub struct ItemPointerData {
     pub ip_blkid: BlockIdData,
     pub ip_posid: BlockIdData,
 }
 
-#[derive(Debug, PartialEq)]
-pub struct HeapTupleHeaderData {
-    pub t_heap: HeapTupleFields,
-
+#[derive(Debug, PartialEq, Struple)]
+pub struct HeapTupleHeader {
+    /// Inserting xact ID
+    pub xmin: TransactionId,
+    /// Deleting or locking xact ID
+    pub xmax: TransactionId,
+    /// Inserting or deleting command ID, or both
+    pub t_cid: CommandId,
     /// Current TID of this or newer tuple (or a speculative insertion token)
     pub t_ctid: ItemPointerData,
     /// Number of attributes + various flags
@@ -48,24 +37,9 @@ pub struct HeapTupleHeaderData {
     pub t_bits: Vec<u8>,
 }
 
-impl HeapTupleHeaderData {
-    fn new(
-        t_heap: HeapTupleFields,
-        t_ctid: ItemPointerData,
-        t_infomask2: u16,
-        t_infomask: u16,
-        t_hoff: u8,
-        t_bits: Vec<u8>,
-    ) -> Self {
-        Self {
-            t_heap,
-            t_ctid,
-            t_infomask2,
-            t_infomask,
-            t_hoff,
-            t_bits,
-        }
-    }
+#[derive(Debug, PartialEq, Struple)]
+pub struct HeapTuple {
+    pub header: HeapTupleHeader,
 }
 
 // t_infomask2 flags
@@ -80,64 +54,76 @@ const HEAP_ONLY_TUPLE: u16 = 0x8000;
 /// visibility-related bits
 const HEAP2_XACT_MASK: u16 = 0xE000;
 
-fn parse_item_pointer_data<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
-    i: &'a [u8],
-) -> IResult<&'a [u8], ItemPointerData, E> {
-    context(
-        "ItemPointerData",
-        (le_u32, le_u32).map(ItemPointerData::from_tuple),
-    )
-    .parse(i)
+// t_infomask
+/// has null attribute(s)
+const HEAP_HASNULL: u8 = 0x0001;
+/// has variable-width attribute(s)
+const HEAP_HASVARWIDTH: u8 = 0x0002;
+/// has external stored attribute(s)
+const HEAP_HASEXTERNAL: u8 = 0x0004;
+/// has an object-id field
+const HEAP_HASOID_OLD: u8 = 0x0008;
+/// xmax is a key-shared locker
+const HEAP_XMAX_KEYSHR_LOCK: u8 = 0x0010;
+/// t_cid is a combo CID
+const HEAP_COMBOCID: u8 = 0x0020;
+/// xmax is exclusive locker
+const HEAP_XMAX_EXCL_LOCK: u8 = 0x0040;
+/// xmax, if valid, is only a locker
+const HEAP_XMAX_LOCK_ONLY: u8 = 0x0080;
+
+pub fn parse_heap_tuple<I, E: ParseError<I>>(input: I) -> IResult<I, HeapTuple, E>
+where
+    I: Input<Item = u8>,
+{
+    parse_heap_tuple_header
+        .map(|header| HeapTuple { header })
+        .parse(input)
 }
 
-fn parse_heap_tuple_fields<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
-    i: &'a [u8],
-) -> IResult<&'a [u8], HeapTupleFields, E> {
-    context(
-        "HeapTupleFields",
-        (le_u32, le_u32, le_u32).map(HeapTupleFields::from_tuple),
+fn parse_heap_tuple_header<I, E: ParseError<I>>(input: I) -> IResult<I, HeapTupleHeader, E>
+where
+    I: Input<Item = u8>,
+{
+    let (input, (xmin, xmax, t_cid, t_ctid, t_infomask2, t_infomask, t_hoff)) = (
+        le_u32,                  // xmin
+        le_u32,                  // xmax
+        le_u32,                  // t_cid
+        parse_item_pointer_data, // t_ctid
+        le_u16,                  // t_infomask2
+        le_u16,                  // t_infomask
+        le_u8,                   // t_hoff
     )
-    .parse(i)
-}
+        .parse(input)?;
 
-type HeapHeaderTypes = (HeapTupleFields, ItemPointerData, u16, u16, u8);
-type HeapHeaderTypesWithBitmaps = (HeapTupleFields, ItemPointerData, u16, u16, u8, Vec<u8>);
-fn parse_bitmaps<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
-    t: HeapHeaderTypes,
-) -> nom::Map<
-    impl Parser<&'a [u8], Output = &'a [u8], Error = E>,
-    impl FnMut(&'a [u8]) -> HeapTupleHeaderData,
-> {
-    let (t_heap, t_ctid, t_infomask2, t_infomask, t_hoff) = t;
     let natts = t_infomask2 & HEAP_NATTS_MASK;
     let bitmap_len = natts.div_ceil(8) * 8;
-    take(bitmap_len).map(move |bitmaps: &'a [u8]| {
-        HeapTupleHeaderData::new(
-            t_heap.clone(),
-            t_ctid.clone(),
+    let (input, t_bits) = take(bitmap_len)
+        .map(|a: I| a.iter_elements().collect())
+        .parse(input)?;
+
+    Ok((
+        input,
+        HeapTupleHeader {
+            xmin,
+            xmax,
+            t_cid,
+            t_ctid,
             t_infomask2,
             t_infomask,
             t_hoff,
-            bitmaps.to_vec(),
-        )
-    })
+            t_bits,
+        },
+    ))
 }
 
-fn parse_heap_header_data<'a, E: ParseError<&'a [u8]> + ContextError<&'a [u8]>>(
-    i: &'a [u8],
-) -> IResult<&'a [u8], HeapTupleHeaderData, E> {
-    context(
-        "HeapHeaderData",
-        (
-            parse_heap_tuple_fields,
-            parse_item_pointer_data,
-            le_u16,
-            le_u16,
-            le_u8,
-        )
-            .flat_map(parse_bitmaps),
-    )
-    .parse(i)
+fn parse_item_pointer_data<I, E: ParseError<I>>(input: I) -> IResult<I, ItemPointerData, E>
+where
+    I: Input<Item = u8>,
+{
+    (le_u32, le_u32)
+        .map(ItemPointerData::from_tuple)
+        .parse(input)
 }
 
 #[cfg(test)]
