@@ -14,7 +14,7 @@ pub type OffsetNumber = u16;
 #[derive(Debug, PartialEq, Struple, Clone)]
 pub struct ItemPointerData {
     pub ip_blkid: BlockIdData,
-    pub ip_posid: BlockIdData,
+    pub ip_posid: OffsetNumber,
 }
 
 #[derive(Debug, PartialEq, Struple)]
@@ -89,7 +89,7 @@ where
         le_u32,                  // xmin
         le_u32,                  // xmax
         le_u32,                  // t_cid
-        parse_item_pointer_data, // t_ctid
+        parse_ctid, // t_ctid
         le_u16,                  // t_infomask2
         le_u16,                  // t_infomask
         le_u8,                   // t_hoff
@@ -97,9 +97,10 @@ where
         .parse(input)?;
 
     let natts = t_infomask2 & HEAP_NATTS_MASK;
-    let bitmap_len = natts.div_ceil(8) * 8;
+    // We store bitmaps as Vec<u8>
+    let bitmap_len = natts.div_ceil(8);
     let (input, t_bits) = take(bitmap_len)
-        .map(|a: I| a.iter_elements().collect())
+        .map(|bitmaps: I| bitmaps.iter_elements().collect())
         .parse(input)?;
 
     Ok((
@@ -117,11 +118,11 @@ where
     ))
 }
 
-fn parse_item_pointer_data<I, E: ParseError<I>>(input: I) -> IResult<I, ItemPointerData, E>
+fn parse_ctid<I, E: ParseError<I>>(input: I) -> IResult<I, ItemPointerData, E>
 where
     I: Input<Item = u8>,
 {
-    (le_u32, le_u32)
+    (le_u32, le_u16)
         .map(ItemPointerData::from_tuple)
         .parse(input)
 }

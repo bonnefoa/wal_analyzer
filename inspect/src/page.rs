@@ -1,17 +1,16 @@
 use bitter::{BitReader, LittleEndianReader};
-use itertools::Itertools;
+use nom::Err;
 use nom::IResult;
 use nom::Input;
 use nom::Parser;
 use nom::bytes::complete::take;
 use nom::error::ParseError;
-use nom::multi::count;
 use nom::number::complete::{le_u8, le_u16, le_u32};
+use nom_language::error::VerboseError;
 use struple::Struple;
 
 use crate::pg_lsn::PageXLogRecPtr;
 use crate::tuple::HeapTuple;
-use crate::tuple::HeapTupleHeader;
 use crate::tuple::parse_heap_tuple;
 
 pub type LocationIndex = u16;
@@ -37,12 +36,11 @@ pub struct PageHeader {
     pub pd_prune_xid: TransactionId,
 }
 
-#[derive(Debug, PartialEq, Struple)]
+#[derive(Debug, PartialEq)]
 pub struct Page {
-    pub header: PageHeader,
-    pub pd_linp: Vec<ItemId>,
-    // Other approach: Store page bytes and access tuples on demand
-    pub tuples: Vec<HeapTuple>,
+    header: PageHeader,
+    /// Page content, without page header
+    data: [u8; PAGE_SIZE],
 }
 
 #[derive(Debug, PartialEq, Struple)]
@@ -55,8 +53,51 @@ pub struct ItemId {
     pub lp_len: u16,
 }
 
-impl Page {
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum PageError {
+    #[error("Invalid line pointer offset '{0}', max is '{1}'")]
+    InvalidOffset(usize, usize),
+    #[error("Error parsing line pointer: '{0}'")]
+    LinePointerParseError(String),
+}
 
+impl From<Err<VerboseError<&[u8]>>> for PageError {
+    fn from(val: Err<VerboseError<&[u8]>>) -> Self {
+        PageError::LinePointerParseError(val.to_string())
+    }
+}
+
+impl Page {
+    /// Compute number of items from page header's pd_lower
+    pub fn num_lp(&self) -> usize {
+        let pd_lower = usize::from(self.header.pd_lower);
+        if pd_lower <= PAGE_HEADER_MEM_SIZE {
+            return 0;
+        }
+        (pd_lower - PAGE_HEADER_MEM_SIZE) / ITEM_ID_DATA_MEM_SIZE
+    }
+
+    pub fn get_line_pointer(&self, offset: usize) -> Result<ItemId, PageError> {
+        let max_offset = self.num_lp();
+        if offset > max_offset {
+            return Err(PageError::InvalidOffset(offset, max_offset));
+        }
+        // Line pointer are 4 bytes and located after page header
+        let start_lp = PAGE_HEADER_MEM_SIZE + offset * 4;
+        let end_lp = start_lp + 4;
+        let lp_bytes = &self.data[start_lp..end_lp];
+
+        let (_, lp) = parse_line_pointer::<&[u8], VerboseError<&[u8]>>(lp_bytes)?;
+        Ok(lp)
+    }
+
+    pub fn get_tuple(&self, offset: usize) -> Result<HeapTuple, PageError> {
+        let lp = self.get_line_pointer(offset)?;
+        let offset = lp.lp_off as usize;
+        let heap_tuple_bytes = &self.data[offset..];
+        let (_, heap_tuple) = parse_heap_tuple::<&[u8], VerboseError<&[u8]>>(heap_tuple_bytes)?;
+        Ok(heap_tuple)
+    }
 }
 
 /// are there any unused line pointers?
@@ -77,7 +118,7 @@ const LP_DEAD: u8 = 3;
 
 const PAGE_HEADER_MEM_SIZE: usize = 24;
 const ITEM_ID_DATA_MEM_SIZE: usize = 4;
-pub const PAGE_SIZE: usize = 4;
+pub const PAGE_SIZE: usize = 8192;
 
 fn parse_lsn<I, E: ParseError<I>>(input: I) -> IResult<I, PageXLogRecPtr, E>
 where
@@ -93,34 +134,23 @@ where
     le_u8(input).map(|(input, a)| (input, u16::from(a) << 8))
 }
 
-/// Parse page header, then pass it to parse_line_pointer
 fn parse_page<I, E: ParseError<I>>(input: I) -> IResult<I, Page, E>
 where
     I: Input<Item = u8>,
 {
-    let (page_bytes, rest) = input.take_split(PAGE_SIZE);
-
-    let (header_bytes, header) = parse_header.parse(page_bytes.clone())?;
-    let (_, pd_linp) = parse_line_pointers(header).parse(header_bytes)?;
-
-    let tuples: Vec<HeapTuple> = pd_linp
-        .iter()
-        .map(|lp| page_bytes.take_from(lp.lp_off as usize))
-        .map(parse_heap_tuple::<I, E>)
-        .map_ok(|a| a.1)
-        .try_collect()?;
-
+    let (input, page_bytes) = input.take_split(PAGE_SIZE);
+    let (_, header) = parse_page_header.parse(page_bytes.clone())?;
+    let data = page_bytes.iter_elements().collect::<Vec<u8>>().try_into();
     Ok((
-        rest,
+        input,
         Page {
             header,
-            pd_linp,
-            tuples,
+            data: data.unwrap(),
         },
     ))
 }
 
-fn parse_header<I, E: ParseError<I>>(input: I) -> IResult<I, PageHeader, E>
+fn parse_page_header<I, E: ParseError<I>>(input: I) -> IResult<I, PageHeader, E>
 where
     I: Input<Item = u8>,
 {
@@ -137,26 +167,6 @@ where
     )
         .map(PageHeader::from_tuple)
         .parse(input)
-}
-
-/// Compute number of items from page header's pd_lower
-fn max_offset_number(pd_lower_u16: LocationIndex) -> usize {
-    let pd_lower = usize::from(pd_lower_u16);
-    if pd_lower <= PAGE_HEADER_MEM_SIZE {
-        return 0;
-    }
-    (pd_lower - PAGE_HEADER_MEM_SIZE) / ITEM_ID_DATA_MEM_SIZE
-}
-
-/// Parse multiple line pointers
-fn parse_line_pointers<I, E: ParseError<I>>(
-    header: PageHeader,
-) -> impl Parser<I, Output = Vec<ItemId>, Error = E>
-where
-    I: Input<Item = u8>,
-{
-    let num_lp = max_offset_number(header.pd_lower);
-    count(parse_line_pointer, num_lp)
 }
 
 /// Parse a single line pointer
@@ -193,13 +203,96 @@ mod tests {
     use nom_language::error::VerboseError;
     use pretty_assertions::assert_eq;
 
-    use crate::page::{
-        ItemId, LP_NORMAL, Page, PageHeader, max_offset_number, parse_line_pointer, parse_page,
+    use crate::{
+        page::{
+            ItemId, LP_NORMAL, PAGE_HEADER_MEM_SIZE, Page, PageHeader, parse_line_pointer,
+            parse_page,
+        },
+        tuple::{HeapTuple, HeapTupleHeader, ItemPointerData},
     };
 
     #[ctor::ctor]
     fn init() {
         env_logger::init();
+    }
+
+    #[test]
+    fn test_parse_page() {
+        let input = include_bytes!("../assets/page_two_tuples").as_slice();
+        let res = parse_page::<&[u8], VerboseError<&[u8]>>(input);
+        assert!(res.is_ok(), "{:?}", res.unwrap_err());
+
+        let (i, page) = res.unwrap();
+        let expected_page = Page {
+            header: PageHeader {
+                pd_lsn: "0/1592EA8".try_into().unwrap(),
+                pd_checksum: 24867,
+                pd_flags: 0,
+                pd_lower: 32,
+                pd_upper: 8128,
+                pd_special: 8192,
+                pd_version: 4,
+                pd_pagesize: 8192,
+                pd_prune_xid: 0,
+            },
+            data: input.try_into().unwrap(),
+        };
+        assert_eq!(expected_page, page);
+
+        let expected_lp_1 = ItemId {
+            lp_off: 8160,
+            lp_flags: 1,
+            lp_len: 28,
+        };
+        let expected_lp_2 = ItemId {
+            lp_off: 8128,
+            lp_flags: 1,
+            lp_len: 28,
+        };
+        let first_lp = page.get_line_pointer(0);
+        let second_lp = page.get_line_pointer(1);
+        assert_eq!(Ok(expected_lp_1), first_lp, "First lp");
+        assert_eq!(Ok(expected_lp_2), second_lp, "Second lp");
+
+        let expected_tuple_1 = HeapTuple {
+            header: HeapTupleHeader {
+                xmin: 767,
+                xmax: 0,
+                t_cid: 0,
+                t_ctid: ItemPointerData {
+                    ip_blkid: 0,
+                    ip_posid: 1,
+                },
+                t_infomask2: 2,
+                t_infomask: 2305,
+                t_hoff: 24,
+                t_bits: vec![1],
+            },
+        };
+
+        let expected_tuple_2 = HeapTuple {
+            header: HeapTupleHeader {
+                xmin: 767,
+                xmax: 0,
+                t_cid: 1,
+                t_ctid: ItemPointerData {
+                    ip_blkid: 0,
+                    ip_posid: 2,
+                },
+                t_infomask2: 2,
+                t_infomask: 2305,
+                t_hoff: 24,
+                t_bits: vec![1],
+            },
+        };
+
+        let first_tuple = page.get_tuple(0);
+        let second_tuple = page.get_tuple(1);
+        assert_eq!(Ok(expected_tuple_1), first_tuple, "First tuple");
+        assert_eq!(Ok(expected_tuple_2), second_tuple, "Second tuple");
+
+        // Nothing should be left to parse
+        assert_eq!(i.len(), 0);
     }
 
     #[test]
@@ -216,57 +309,5 @@ mod tests {
             lp_len: 28,
         };
         assert_eq!(expected_item_id_data, item_id_data);
-    }
-
-    #[test]
-    fn test_parse_page() {
-        let input = include_bytes!("../assets/page_two_tuples").as_slice();
-        let res = parse_page::<&[u8], VerboseError<&[u8]>>(input);
-        assert!(res.is_ok(), "{:?}", res.unwrap_err());
-        let (i, page) = res.unwrap();
-
-        let expected_linp = vec![
-            ItemId {
-                lp_off: 8160,
-                lp_flags: 1,
-                lp_len: 28,
-            },
-            ItemId {
-                lp_off: 8128,
-                lp_flags: 1,
-                lp_len: 28,
-            },
-        ];
-        let expected_heap_tuples = vec![];
-
-        let expected_page = Page {
-            header: PageHeader {
-                pd_lsn: "0/1592EA8".try_into().unwrap(),
-                pd_checksum: 24867,
-                pd_flags: 0,
-                pd_lower: 32,
-                pd_upper: 8128,
-                pd_special: 8192,
-                pd_version: 4,
-                pd_pagesize: 8192,
-                pd_prune_xid: 0,
-            },
-            pd_linp: expected_linp,
-            tuples: expected_heap_tuples,
-        };
-        assert_eq!(expected_page, page);
-
-        assert_eq!(
-            max_offset_number(page.header.pd_lower),
-            2,
-            "Should have 2 line pointer in the header"
-        );
-        assert_eq!(page.pd_linp.len(), 2);
-
-        //        assert!(
-        //            i.is_empty(),
-        //            "Everything should have been consumed, still got {:x?}",
-        //            i
-        //        );
     }
 }
