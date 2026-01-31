@@ -1,10 +1,12 @@
+use bit_set::BitSet;
 use nom::bytes::take;
 use nom::number::complete::{le_u8, le_u16};
 use nom::{IResult, error::ParseError, number::complete::le_u32};
 use nom::{Input, Parser};
 use struple::Struple;
 
-use crate::page::{PAGE_SIZE, TransactionId};
+use crate::page::TransactionId;
+use crate::tuple_desc::TupleDescriptor;
 
 pub type CommandId = u32;
 pub type Oid = u32;
@@ -34,7 +36,7 @@ pub struct HeapTupleHeader {
     /// sizeof header incl. bitmap, padding
     pub t_hoff: u8,
     /// bitmaps of NULLs
-    pub t_bits: Vec<u8>,
+    pub t_bits: BitSet<u32>,
 }
 
 #[derive(Debug, PartialEq, Struple)]
@@ -86,13 +88,13 @@ where
     I: Input<Item = u8>,
 {
     let (input, (xmin, xmax, t_cid, t_ctid, t_infomask2, t_infomask, t_hoff)) = (
-        le_u32,                  // xmin
-        le_u32,                  // xmax
-        le_u32,                  // t_cid
+        le_u32,     // xmin
+        le_u32,     // xmax
+        le_u32,     // t_cid
         parse_ctid, // t_ctid
-        le_u16,                  // t_infomask2
-        le_u16,                  // t_infomask
-        le_u8,                   // t_hoff
+        le_u16,     // t_infomask2
+        le_u16,     // t_infomask
+        le_u8,      // t_hoff
     )
         .parse(input)?;
 
@@ -125,10 +127,4 @@ where
     (le_u32, le_u16)
         .map(ItemPointerData::from_tuple)
         .parse(input)
-}
-
-#[cfg(test)]
-mod tests {
-    use nom_language::error::VerboseError;
-    use pretty_assertions::assert_eq;
 }
