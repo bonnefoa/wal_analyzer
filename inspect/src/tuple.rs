@@ -102,7 +102,7 @@ where
     // We store bitmaps as Vec<u8>
     let bitmap_len = natts.div_ceil(8);
     let (input, t_bits) = take(bitmap_len)
-        .map(|bitmaps: I| bitmaps.iter_elements().collect())
+        .map(|a: I| BitSet::from_bytes(&a.iter_elements().collect::<Vec<u8>>()))
         .parse(input)?;
 
     Ok((

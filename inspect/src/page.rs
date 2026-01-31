@@ -200,6 +200,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use bit_set::BitSet;
     use nom_language::error::VerboseError;
     use pretty_assertions::assert_eq;
 
@@ -266,7 +267,7 @@ mod tests {
                 t_infomask2: 2,
                 t_infomask: 2305,
                 t_hoff: 24,
-                t_bits: vec![1],
+                t_bits: BitSet::from_bytes(&[0b1]),
             },
         };
 
@@ -282,7 +283,7 @@ mod tests {
                 t_infomask2: 2,
                 t_infomask: 2305,
                 t_hoff: 24,
-                t_bits: vec![1],
+                t_bits: BitSet::from_bytes(&[0b1]),
             },
         };
 
