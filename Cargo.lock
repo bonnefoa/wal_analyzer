@@ -304,6 +304,7 @@ name = "inspect"
 version = "0.1.0"
 dependencies = [
  "bit-set",
+ "bit-vec",
  "bitter",
  "ctor 0.5.0",
  "env_logger",

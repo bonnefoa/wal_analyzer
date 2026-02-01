@@ -1,5 +1,6 @@
-use bit_set::BitSet;
+use bit_vec::BitVec;
 use nom::bytes::take;
+use nom::error::{Error, ErrorKind};
 use nom::number::complete::{le_i32, le_u8, le_u16};
 use nom::{IResult, error::ParseError, number::complete::le_u32};
 use nom::{Input, Parser};
@@ -36,7 +37,7 @@ pub struct HeapTupleHeader {
     /// sizeof header incl. bitmap, padding
     pub t_hoff: u8,
     /// bitmaps of NULLs
-    pub t_bits: BitSet<u32>,
+    pub t_bits: BitVec<u32>,
 }
 
 // t_infomask2 flags
@@ -88,7 +89,10 @@ where
     // We store bitmaps as Vec<u8>
     let bitmap_len = natts.div_ceil(8);
     let (input, t_bits) = take(bitmap_len)
-        .map(|a: I| BitSet::from_bytes(&a.iter_elements().collect::<Vec<u8>>()))
+        .map(|bitmap_bytes: I| {
+            let vec = &bitmap_bytes.iter_elements().collect::<Vec<u8>>();
+            BitVec::from_bytes(vec)
+        })
         .parse(input)?;
 
     Ok((
@@ -115,8 +119,8 @@ where
         .parse(input)
 }
 
-#[derive(Debug)]
-enum TupleValue {
+#[derive(Debug, PartialEq)]
+pub enum TupleValue {
     Int2(i16),
     Int4(i32),
     Int8(i64),
@@ -132,38 +136,53 @@ where
 {
     match type_output {
         TypeOutput::Int4 => le_i32.map(TupleValue::Int4).parse(input),
-        default => todo!("Type not handled: {:?}", type_output),
+        t => todo!("Type not supported: {:?}", t),
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, thiserror::Error)]
+pub enum DeformError<I> {
+    #[error("Attribute not int bitmaps '{0}'")]
+    NotInBitmaps(usize),
+    #[error("Nom error")]
+    Nom(I, ErrorKind),
+}
+
+impl<I> ParseError<I> for DeformError<I> {
+    fn from_error_kind(input: I, kind: ErrorKind) -> Self {
+        DeformError::Nom(input, kind)
+    }
+
+    fn append(_: I, _: ErrorKind, other: Self) -> Self {
+        other
     }
 }
 
 pub fn deform_tuple<I, E: ParseError<I>>(
+    input: I,
     heap_tuple: &HeapTupleHeader,
-    desc: &TupleDescriptor,
-    t_data: I,
+    tuple_desc: &TupleDescriptor,
 ) -> IResult<I, Vec<Option<TupleValue>>, E>
 where
     I: Input<Item = u8>,
 {
-    desc.attributes.iter().enumerate().map(|(idx, attr)| {
-        if heap_tuple.t_bits.contains(idx) {
-            None
+    let mut res: Vec<Option<TupleValue>> = vec![];
+    let mut current_input = input;
+    for (idx, attr) in tuple_desc.attributes.iter().enumerate() {
+        if !heap_tuple.t_bits.get(idx).expect("Missing bitmap for {idx}") {
+            res.push(None);
         } else {
-            None
+            let (input, v) = match &attr.type_output {
+                TypeOutput::Int4 => le_i32
+                    .map(TupleValue::Int4)
+                    .map(Some)
+                    .parse(current_input)?,
+                // TypeOutput::Int4 => le_i32.map(TupleValue::Int4).map(Some).parse(current_input)?,
+                t => todo!("Type not handled: {:?}", t),
+            };
+            current_input = input;
+            res.push(v);
         }
-    });
-
-    // let mut res: Vec<Option<TupleValue>> = vec![];
-    //    for (idx, attr) in desc.attributes.iter().enumerate() {
-    //        if heap_tuple.t_bits.contains(idx) {
-    //            res.push(None);
-    //        } else {
-    //            let (t_data, v) = match &attr.type_output {
-    //                TypeOutput::Int4 => le_i32.map(TupleValue::Int4).map(Some).parse(t_data)?,
-    //                default => todo!("Type not handled: {:?}", attr.type_output),
-    //            };
-    //            res.push(v);
-    //        }
-    //    }
-
-    todo!();
+    }
+    Ok((current_input, res))
 }

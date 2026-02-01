@@ -100,7 +100,6 @@ impl Page {
             parse_heap_tuple_header::<&[u8], VerboseError<&[u8]>>(heap_tuple_bytes)?;
         Ok(heap_tuple)
     }
-
 }
 
 /// are there any unused line pointers?
@@ -204,12 +203,14 @@ where
 #[cfg(test)]
 mod tests {
     use bit_set::BitSet;
+    use bit_vec::BitVec;
     use nom_language::error::VerboseError;
     use pretty_assertions::assert_eq;
 
     use crate::{
         page::{ItemId, LP_NORMAL, Page, PageHeader, parse_line_pointer, parse_page},
-        tuple::{HeapTupleHeader, ItemPointerData},
+        tuple::{HeapTupleHeader, ItemPointerData, TupleValue, deform_tuple},
+        tuple_desc::TupleDescriptorMap,
     };
 
     #[ctor::ctor]
@@ -266,7 +267,7 @@ mod tests {
             t_infomask2: 2,
             t_infomask: 2305,
             t_hoff: 24,
-            t_bits: BitSet::from_bytes(&[0b1]),
+            t_bits: BitVec::from_bytes(&[0b1]),
         };
 
         let expected_tuple_2 = HeapTupleHeader {
@@ -280,7 +281,7 @@ mod tests {
             t_infomask2: 2,
             t_infomask: 2305,
             t_hoff: 24,
-            t_bits: BitSet::from_bytes(&[0b1]),
+            t_bits: BitVec::from_bytes(&[0b1]),
         };
 
         let first_tuple = page.get_tuple(0);
@@ -306,5 +307,24 @@ mod tests {
             lp_len: 28,
         };
         assert_eq!(expected_item_id_data, item_id_data);
+    }
+
+    #[test]
+    fn test_deform() {
+        let tuple_descs: TupleDescriptorMap =
+            serde_json::from_str(include_str!("../assets/tuple_descriptor_test.json")).unwrap();
+        let tuple_desc = &tuple_descs["16462"];
+
+        let input = include_bytes!("../assets/page_two_tuples").as_slice();
+        let (_, page) = parse_page::<&[u8], VerboseError<&[u8]>>(input).unwrap();
+        let t_data = &input[8160..8160 + 28];
+
+        let heap_tuple = page.get_tuple(0).unwrap();
+        assert_eq!(heap_tuple.t_bits, BitVec::from_bytes(&[0b1]));
+        assert_eq!(heap_tuple.t_bits.get(0), Some(false));
+        assert_eq!(heap_tuple.t_bits.get(1), Some(true));
+        let (_, r) = deform_tuple::<&[u8], VerboseError<&[u8]>>(t_data, &heap_tuple, &tuple_desc).unwrap();
+        let expected_deform_values = vec![None, Some(TupleValue::Int4(1))];
+        assert_eq!(r, expected_deform_values);
     }
 }

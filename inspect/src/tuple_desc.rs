@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 pub type TupleDescriptorMap = HashMap<String, TupleDescriptor>;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Copy, Clone)]
 pub enum TypeOutput {
     #[serde(rename = "boolout")]
     Bool,
@@ -89,13 +89,5 @@ mod tests {
         let tuple_descs: TupleDescriptorMap =
             serde_json::from_str(include_str!("../assets/tuple_descriptor_test.json")).unwrap();
         assert_eq!(tuple_descs.len(), 2);
-    }
-
-    #[test]
-    fn test_deform() {
-        let tuple_descs: TupleDescriptorMap =
-            serde_json::from_str(include_str!("../assets/tuple_descriptor_test.json")).unwrap();
-        let tuple = &include_bytes!("../assets/page_two_tuples")[8160..8160 + 28];
-        // deform_tuple(tuple_descs["16462"] (tuple);
     }
 }
