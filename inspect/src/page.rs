@@ -10,8 +10,9 @@ use nom_language::error::VerboseError;
 use struple::Struple;
 
 use crate::pg_lsn::PageXLogRecPtr;
-use crate::tuple::HeapTuple;
-use crate::tuple::parse_heap_tuple;
+use crate::tuple::HeapTupleHeader;
+use crate::tuple::parse_heap_tuple_header;
+use crate::tuple_desc::TupleDescriptor;
 
 pub type LocationIndex = u16;
 pub type TransactionId = u32;
@@ -91,13 +92,15 @@ impl Page {
         Ok(lp)
     }
 
-    pub fn get_tuple(&self, offset: usize) -> Result<HeapTuple, PageError> {
+    pub fn get_tuple(&self, offset: usize) -> Result<HeapTupleHeader, PageError> {
         let lp = self.get_line_pointer(offset)?;
         let offset = lp.lp_off as usize;
         let heap_tuple_bytes = &self.data[offset..];
-        let (_, heap_tuple) = parse_heap_tuple::<&[u8], VerboseError<&[u8]>>(heap_tuple_bytes)?;
+        let (_, heap_tuple) =
+            parse_heap_tuple_header::<&[u8], VerboseError<&[u8]>>(heap_tuple_bytes)?;
         Ok(heap_tuple)
     }
+
 }
 
 /// are there any unused line pointers?
@@ -205,11 +208,8 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use crate::{
-        page::{
-            ItemId, LP_NORMAL, PAGE_HEADER_MEM_SIZE, Page, PageHeader, parse_line_pointer,
-            parse_page,
-        },
-        tuple::{HeapTuple, HeapTupleHeader, ItemPointerData},
+        page::{ItemId, LP_NORMAL, Page, PageHeader, parse_line_pointer, parse_page},
+        tuple::{HeapTupleHeader, ItemPointerData},
     };
 
     #[ctor::ctor]
@@ -255,36 +255,32 @@ mod tests {
         assert_eq!(Ok(expected_lp_1), first_lp, "First lp");
         assert_eq!(Ok(expected_lp_2), second_lp, "Second lp");
 
-        let expected_tuple_1 = HeapTuple {
-            header: HeapTupleHeader {
-                xmin: 767,
-                xmax: 0,
-                t_cid: 0,
-                t_ctid: ItemPointerData {
-                    ip_blkid: 0,
-                    ip_posid: 1,
-                },
-                t_infomask2: 2,
-                t_infomask: 2305,
-                t_hoff: 24,
-                t_bits: BitSet::from_bytes(&[0b1]),
+        let expected_tuple_1 = HeapTupleHeader {
+            xmin: 767,
+            xmax: 0,
+            t_cid: 0,
+            t_ctid: ItemPointerData {
+                ip_blkid: 0,
+                ip_posid: 1,
             },
+            t_infomask2: 2,
+            t_infomask: 2305,
+            t_hoff: 24,
+            t_bits: BitSet::from_bytes(&[0b1]),
         };
 
-        let expected_tuple_2 = HeapTuple {
-            header: HeapTupleHeader {
-                xmin: 767,
-                xmax: 0,
-                t_cid: 1,
-                t_ctid: ItemPointerData {
-                    ip_blkid: 0,
-                    ip_posid: 2,
-                },
-                t_infomask2: 2,
-                t_infomask: 2305,
-                t_hoff: 24,
-                t_bits: BitSet::from_bytes(&[0b1]),
+        let expected_tuple_2 = HeapTupleHeader {
+            xmin: 767,
+            xmax: 0,
+            t_cid: 1,
+            t_ctid: ItemPointerData {
+                ip_blkid: 0,
+                ip_posid: 2,
             },
+            t_infomask2: 2,
+            t_infomask: 2305,
+            t_hoff: 24,
+            t_bits: BitSet::from_bytes(&[0b1]),
         };
 
         let first_tuple = page.get_tuple(0);

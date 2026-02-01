@@ -1,12 +1,12 @@
 use bit_set::BitSet;
 use nom::bytes::take;
-use nom::number::complete::{le_u8, le_u16};
+use nom::number::complete::{le_i32, le_u8, le_u16};
 use nom::{IResult, error::ParseError, number::complete::le_u32};
 use nom::{Input, Parser};
 use struple::Struple;
 
 use crate::page::TransactionId;
-use crate::tuple_desc::TupleDescriptor;
+use crate::tuple_desc::{TupleDescriptor, TypeOutput};
 
 pub type CommandId = u32;
 pub type Oid = u32;
@@ -39,11 +39,6 @@ pub struct HeapTupleHeader {
     pub t_bits: BitSet<u32>,
 }
 
-#[derive(Debug, PartialEq, Struple)]
-pub struct HeapTuple {
-    pub header: HeapTupleHeader,
-}
-
 // t_infomask2 flags
 /// 11 bits for number of attributes
 const HEAP_NATTS_MASK: u16 = 0x07FF;
@@ -74,16 +69,7 @@ const HEAP_XMAX_EXCL_LOCK: u8 = 0x0040;
 /// xmax, if valid, is only a locker
 const HEAP_XMAX_LOCK_ONLY: u8 = 0x0080;
 
-pub fn parse_heap_tuple<I, E: ParseError<I>>(input: I) -> IResult<I, HeapTuple, E>
-where
-    I: Input<Item = u8>,
-{
-    parse_heap_tuple_header
-        .map(|header| HeapTuple { header })
-        .parse(input)
-}
-
-fn parse_heap_tuple_header<I, E: ParseError<I>>(input: I) -> IResult<I, HeapTupleHeader, E>
+pub fn parse_heap_tuple_header<I, E: ParseError<I>>(input: I) -> IResult<I, HeapTupleHeader, E>
 where
     I: Input<Item = u8>,
 {
@@ -127,4 +113,57 @@ where
     (le_u32, le_u16)
         .map(ItemPointerData::from_tuple)
         .parse(input)
+}
+
+#[derive(Debug)]
+enum TupleValue {
+    Int2(i16),
+    Int4(i32),
+    Int8(i64),
+    Text(String),
+}
+
+fn parse_tuple_value<I, E: ParseError<I>>(
+    input: I,
+    type_output: TypeOutput,
+) -> IResult<I, TupleValue, E>
+where
+    I: Input<Item = u8>,
+{
+    match type_output {
+        TypeOutput::Int4 => le_i32.map(TupleValue::Int4).parse(input),
+        default => todo!("Type not handled: {:?}", type_output),
+    }
+}
+
+pub fn deform_tuple<I, E: ParseError<I>>(
+    heap_tuple: &HeapTupleHeader,
+    desc: &TupleDescriptor,
+    t_data: I,
+) -> IResult<I, Vec<Option<TupleValue>>, E>
+where
+    I: Input<Item = u8>,
+{
+    desc.attributes.iter().enumerate().map(|(idx, attr)| {
+        if heap_tuple.t_bits.contains(idx) {
+            None
+        } else {
+            None
+        }
+    });
+
+    // let mut res: Vec<Option<TupleValue>> = vec![];
+    //    for (idx, attr) in desc.attributes.iter().enumerate() {
+    //        if heap_tuple.t_bits.contains(idx) {
+    //            res.push(None);
+    //        } else {
+    //            let (t_data, v) = match &attr.type_output {
+    //                TypeOutput::Int4 => le_i32.map(TupleValue::Int4).map(Some).parse(t_data)?,
+    //                default => todo!("Type not handled: {:?}", attr.type_output),
+    //            };
+    //            res.push(v);
+    //        }
+    //    }
+
+    todo!();
 }
