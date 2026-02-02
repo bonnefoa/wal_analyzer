@@ -1,4 +1,5 @@
-use bit_vec::BitVec;
+use bitvec::order::Lsb0;
+use bitvec::vec::BitVec;
 use nom::bytes::take;
 use nom::error::{Error, ErrorKind};
 use nom::number::complete::{le_i32, le_u8, le_u16};
@@ -37,7 +38,7 @@ pub struct HeapTupleHeader {
     /// sizeof header incl. bitmap, padding
     pub t_hoff: u8,
     /// bitmaps of NULLs
-    pub t_bits: BitVec<u32>,
+    pub t_bits: BitVec<u8, Lsb0>,
 }
 
 // t_infomask2 flags
@@ -91,7 +92,7 @@ where
     let (input, t_bits) = take(bitmap_len)
         .map(|bitmap_bytes: I| {
             let vec = &bitmap_bytes.iter_elements().collect::<Vec<u8>>();
-            BitVec::from_bytes(vec)
+            BitVec::<u8, Lsb0>::from_slice(vec)
         })
         .parse(input)?;
 
